@@ -144,14 +144,14 @@ def get_back_kb():
 def generate_main_text(user, uid):
     """主界面正文统一使用 Telegram Custom Emoji 实体，不混用普通 Emoji。"""
     return (
-        f'<tg-emoji emoji-id="{EMOJI["star"]}">✨</tg-emoji> <b>欢迎光临晴天号铺。</b>\\n\\n'
-        f'<tg-emoji emoji-id="{EMOJI["diamond"]}">📌</tg-emoji> <b>您的专属账户信息</b>\\n'
-        f' ├ <tg-emoji emoji-id="{EMOJI["gear"]}">🆔</tg-emoji> <b>用户 ID：</b> <code>{uid}</code>\\n'
-        f' ├ <tg-emoji emoji-id="{EMOJI["usdt"]}">💰</tg-emoji> <b>账户余额：</b> <b>{user["balance"]:.2f}</b> USDT\\n'
-        f' ├ <tg-emoji emoji-id="{EMOJI["apple"]}">🛒</tg-emoji> <b>订单记录：</b> {user.get("orders_count", 0)} 单\\n'
-        f' ├ <tg-emoji emoji-id="{EMOJI["tg"]}">👥</tg-emoji> <b>邀请用户：</b> {user.get("invited_count", 0)} 位\\n'
-        f' └ <tg-emoji emoji-id="{EMOJI["gift"]}">🎁</tg-emoji> <b>邀请奖励：</b> 累计 {user.get("invite_bonus", 0.0):.2f} USDT\\n\\n'
-        f'━━━━━━━━━━━━━━━━\\n'
+        f'<tg-emoji emoji-id="{EMOJI["star"]}">✨</tg-emoji> <b>欢迎光临晴天号铺。</b>\n\n'
+        f'<tg-emoji emoji-id="{EMOJI["diamond"]}">📌</tg-emoji> <b>您的专属账户信息</b>\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["gear"]}">🆔</tg-emoji> <b>用户 ID：</b> <code>{uid}</code>\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["usdt"]}">💰</tg-emoji> <b>账户余额：</b> <b>{user["balance"]:.2f}</b> USDT\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["apple"]}">🛒</tg-emoji> <b>订单记录：</b> {user.get("orders_count", 0)} 单\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["tg"]}">👥</tg-emoji> <b>邀请用户：</b> {user.get("invited_count", 0)} 位\n'
+        f' └ <tg-emoji emoji-id="{EMOJI["gift"]}">🎁</tg-emoji> <b>邀请奖励：</b> 累计 {user.get("invite_bonus", 0.0):.2f} USDT\n\n'
+        f'━━━━━━━━━━━━━━━━\n'
         f'<tg-emoji emoji-id="{EMOJI["star"]}">🛒</tg-emoji> <b>自助选购</b>：点击下方按钮即可挑选。'
     )
 
