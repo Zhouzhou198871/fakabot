@@ -15,7 +15,7 @@ class FakeBot:
         self.fail_send = False
 
     def get_chat(self, chat_id):
-        return SimpleNamespace(pinned_message=self.pinned_message)
+        return SimpleNamespace(type="channel", username=None, pinned_message=self.pinned_message)
 
     def send_document(self, chat_id, document, caption, disable_notification=True):
         if self.fail_send:
