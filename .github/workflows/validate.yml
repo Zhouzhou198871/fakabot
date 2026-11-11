@@ -58,4 +58,47 @@ jobs:
           assert all(len(row) == 2 for row in keyboard.keyboard)
           assert all(button.callback_data for row in keyboard.keyboard for button in row)
           print("Bot import and six-button main menu construction passed.")
+
+      - name: Verify Premium emoji rejection fallback
+        env:
+          BOT_TOKEN: "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+        run: |
+          python - <<'PY'
+          import bot
+
+          original = bot._original_send_message
+          calls = []
+
+          def fake_send(*args, **kwargs):
+              calls.append((args, kwargs))
+              text = args[1] if len(args) > 1 else kwargs.get("text", "")
+              markup = kwargs.get("reply_markup")
+              if "<tg-emoji" in text:
+                  raise RuntimeError("Bad Request: can't parse entities")
+              if markup and any(
+                  getattr(button, "icon_custom_emoji_id", None)
+                  for row in markup.keyboard for button in row
+              ):
+                  raise RuntimeError("BUTTON_ICON_INVALID")
+              return "ok"
+
+          bot._original_send_message = fake_send
+          try:
+              result = bot.bot.send_message(
+                  1, bot.premium_emoji("star", "✨"),
+                  reply_markup=bot.get_main_kb()
+              )
+              assert result == "ok"
+              assert len(calls) == 3
+              final_text = calls[-1][0][1]
+              final_markup = calls[-1][1]["reply_markup"]
+              assert "<tg-emoji" not in final_text
+              assert all(
+                  not getattr(button, "icon_custom_emoji_id", None)
+                  for row in final_markup.keyboard for button in row
+              )
+              print("Premium text and button icon rejection fallbacks passed.")
+          finally:
+              bot._original_send_message = original
+          PY
           PY
