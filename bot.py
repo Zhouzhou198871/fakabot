@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import telebot, time, json, os, requests
+import telebot, time, json, os
 from telebot import types
 
 TOKEN = "8938905914:AAF7og--rRBPasko6ZXAXVx16yw51smucv8"
@@ -13,10 +13,55 @@ EMOJI = {
     "node": "6244694135542913498"
 }
 
-APPLE_PRODUCTS = [{"id": "a1", "name": "🤝美区 共享账号 | 已购小伙剪APP", "price": "2.78"}, {"id": "a2", "name": "🤝香港 | 注册半年左右", "price": "2.78"}]
-TG_PRODUCTS = [{"id": "t1", "name": "✈️ 美国 +1 成品号", "price": "4.5"}]
-AI_PRODUCTS = [{"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"}]
-NODE_PRODUCTS = [{"id": "n1", "name": "🌐 高速专线节点 100G", "price": "10.0"}]
+# ================= 完整真实数据区 =================
+APPLE_PRODUCTS = [
+    {"id": "a1", "name": "🤝美区 共享账号 | 已购小伙剪APP", "price": "2.78"},
+    {"id": "a2", "name": "🤝香港 | 注册半年左右 | 完整密保", "price": "2.78"},
+    {"id": "a3", "name": "🤝美区 | 注册半年左右 | 完整密保", "price": "2.78"},
+    {"id": "a4", "name": "🤝韩国 | 注册半年左右 | 完整密保", "price": "2.78"},
+    {"id": "a5", "name": "🤝日本 | 注册半年左右 | 完整密保", "price": "2.78"},
+    {"id": "a6", "name": "🤝日本老号 | 密保资料齐全 | 独享", "price": "5.21"},
+    {"id": "a7", "name": "🤝马来西亚老号 | 密保资料齐全 | 独享", "price": "5.21"},
+    {"id": "a8", "name": "🟠台湾 | 独享 | 仅适用于app store", "price": "5.56"},
+    {"id": "a9", "name": "💖美国IC(激活iCloud设置和下载)", "price": "8.06"},
+    {"id": "a10", "name": "💖独享下载号 | Icloud后缀", "price": "8.25"},
+    {"id": "a11", "name": "💖注册1-5年老号超稳", "price": "9.70"},
+    {"id": "a12", "name": "💖2010~2020年老号", "price": "10.39"},
+    {"id": "a13", "name": "💖美国 | 免税区 | 激活iCloud", "price": "10.58"},
+    {"id": "a14", "name": "💖包含密保 | 独享下载号", "price": "10.90"},
+    {"id": "a15", "name": "💖独享下载号 | 冷门国家", "price": "11.09"},
+    {"id": "a16", "name": "💖台湾13~19年私人号 | 禁IM", "price": "12.11"},
+    {"id": "a17", "name": "💖美国13~19年私人号 | 免税区", "price": "12.11"},
+    {"id": "a18", "name": "💖10个月以上 | 稳定IC", "price": "12.48"},
+    {"id": "a19", "name": "💖美国 | 注册超过10年", "price": "13.25"},
+    {"id": "a20", "name": "💖注册超5-10年以上老IC", "price": "13.68"},
+    {"id": "a21", "name": "💖注册超15年以上珍藏老号", "price": "19.24"},
+    {"id": "a22", "name": "💖绝版15年以上老IC", "price": "20.63"},
+    {"id": "a23", "name": "💖已购买小火箭shadowrocket", "price": "24.30"},
+    {"id": "a24", "name": "💖美国 | 注册超5-10年私人号 | 小火箭", "price": "61.11"},
+    {"id": "a25", "name": "💖美国 | 注册超15年私人号 | 小火箭", "price": "105.08"}
+]
+
+TG_PRODUCTS = [
+    {"id": "t1", "name": "✈️ 美国 +1 成品号", "price": "4.5"},
+    {"id": "t2", "name": "✈️ 印度 +91 成品号", "price": "2.0"},
+    {"id": "t3", "name": "✈️ 印尼 +62 成品号", "price": "3.0"},
+    {"id": "t4", "name": "✈️ 菲律宾 +63 成品号", "price": "3.5"},
+    {"id": "t5", "name": "✈️ 越南 +84 成品号", "price": "4.0"}
+]
+
+AI_PRODUCTS = [
+    {"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"},
+    {"id": "ai2", "name": "🤖 Claude 3 独享账号", "price": "15.0"},
+    {"id": "ai3", "name": "🎨 Midjourney 共享号", "price": "20.0"}
+]
+
+NODE_PRODUCTS = [
+    {"id": "n1", "name": "🌐 高速专线节点 100G", "price": "10.0"},
+    {"id": "n2", "name": "🚀 极速抗封锁节点 500G", "price": "30.0"},
+    {"id": "n3", "name": "💎 独享顶级节点 1T", "price": "50.0"}
+]
+# ================================================
 
 def get_user(uid, name=""):
     if not os.path.exists(USERS_FILE):
@@ -52,12 +97,12 @@ def get_main_kb():
 def get_more_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
-        types.InlineKeyboardButton("节点交流群", url="https://t.me/qingtian_vip"),
-        types.InlineKeyboardButton("代理频道", url="https://t.me/jiedian888")
+        types.InlineKeyboardButton("📢 节点交流群", url="https://t.me/qingtian_vip"),
+        types.InlineKeyboardButton("📢 代理频道", url="https://t.me/jiedian888")
     )
     kb.row(
-        types.InlineKeyboardButton("账号铺频道", url="https://t.me/qingtian_tutorial"),
-        types.InlineKeyboardButton("联系客服", callback_data="show_support")
+        types.InlineKeyboardButton("📢 账号铺频道", url="https://t.me/qingtian_tutorial"),
+        types.InlineKeyboardButton("💬 联系客服", callback_data="show_support")
     )
     kb.row(
         types.InlineKeyboardButton("🔙 返回", callback_data="ui_buy"),
@@ -83,6 +128,7 @@ def get_products_kb(cat_id):
         btn = types.InlineKeyboardButton(f"{p['name']} | {p['price']} U", callback_data=f"buy_{p['id']}")
         if cat_id == "apple": btn.icon_custom_emoji_id = EMOJI["apple"]
         if cat_id == "tg": btn.icon_custom_emoji_id = EMOJI["tg"]
+        if cat_id == "ai": btn.icon_custom_emoji_id = EMOJI["ai"]
         kb.add(btn)
     back_btn = "cat_account" if cat_id in ["apple", "tg", "ai", "video"] else "ui_buy"
     kb.add(types.InlineKeyboardButton("🔙 返回上一级", callback_data=back_btn))
@@ -125,30 +171,23 @@ def show_more_menu(call):
     text = "加入官方社群，获取最新动态。\n如有任何疑问，请随时联系客服为您解答。\n\n👇 请选择需要的服务："
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_more_kb())
 
-# 🌟 联系客服：自动抓取机器人头像发送
 @bot.callback_query_handler(func=lambda call: call.data == "show_support")
 def show_support(call):
     bot.answer_callback_query(call.id)
-    text = (
-        "如果在购买或使用过程中遇到任何问题，请点击下方按钮联系人工客服。\n\n"
-        "⏰ <b>客服在线时间：</b> 09:00 - 24:00"
-    )
+    text = "如果在购买或使用过程中遇到任何问题，请点击下方按钮联系人工客服。\n\n⏰ <b>客服在线时间：</b> 09:00 - 24:00"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
         types.InlineKeyboardButton("👨‍💻 主客服 @qingtian_Boss", url="https://t.me/qingtian_Boss"),
         types.InlineKeyboardButton("🔙 返回", callback_data="more_services")
     )
-    
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
 
-    # 抓取机器人自己的头像
     photos = bot.get_user_profile_photos(call.bot.id, limit=1)
     if photos.total_count > 0:
         file_id = photos.photos[0][-1].file_id
         bot.send_photo(call.message.chat.id, file_id, caption=text, parse_mode="HTML", reply_markup=kb)
     else:
-        # 没头像就兜底发文字
         bot.send_message(call.message.chat.id, "💬 <b>联系客服</b>\n" + text, parse_mode="HTML", reply_markup=kb)
 
 @bot.callback_query_handler(func=lambda call: call.data == "cat_account")
@@ -223,5 +262,5 @@ def show_recharge(call):
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
 if __name__ == "__main__":
-    print("🔥 自动抓取头像客服版已启动...")
+    print("🔥 包含完整数据的最终版已启动...")
     bot.polling(non_stop=True)
