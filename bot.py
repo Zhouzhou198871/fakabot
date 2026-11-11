@@ -1366,6 +1366,87 @@ def daily_report_text(report_date):
     )
 
 
+def _metric_time(value, report_tz):
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value), tz=report_tz)
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=report_tz) if parsed.tzinfo is None else parsed.astimezone(report_tz)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def three_hour_report_text(start_at, end_at, counters, report_tz):
+    orders = load_json_file(ORDERS_FILE, [])
+    paid = []
+    revenue = 0.0
+    if isinstance(orders, list):
+        for order in orders:
+            if not isinstance(order, dict) or not _order_is_paid(order):
+                continue
+            paid_at = _metric_time(
+                order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at"),
+                report_tz,
+            )
+            if paid_at and start_at <= paid_at < end_at:
+                paid.append(order)
+                revenue += _order_amount(order)
+    start_text = start_at.strftime("%Y-%m-%d %H:%M")
+    end_text = end_at.strftime("%Y-%m-%d %H:%M")
+    return (
+        "☀️ <b>晴天号铺 · 三小时运营汇报</b>\n"
+        f"统计日期：<code>{start_at.strftime('%Y-%m-%d')}</code>\n"
+        f"统计区间：<code>{start_text} — {end_text}</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"接待消息：<b>{int(counters.get('inbound_messages', 0))}</b> 次\n"
+        f"按钮交互：<b>{int(counters.get('callback_interactions', 0))}</b> 次\n"
+        f"成功收入：<b>{revenue:.2f} USDT</b>\n"
+        f"成功支付订单：<b>{len(paid)}</b> 笔\n"
+        f"签到：<b>{int(counters.get('checkins', 0))}</b> 次\n"
+        f"发出节点：<b>{int(counters.get('nodes_issued', 0))}</b> 个\n"
+        f"收回节点：<b>{int(counters.get('nodes_returned', 0))}</b> 个\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<i>接待按消息和按钮操作次数累计，不做用户去重。签到及节点数量仅统计机器人已接入的成功事件。</i>"
+    )
+
+
+def three_hour_report_loop():
+    timezone_name = os.getenv("REPORT_TIMEZONE", "Asia/Shanghai")
+    try:
+        report_tz = ZoneInfo(timezone_name)
+    except Exception:
+        print("⚠️ REPORT_TIMEZONE 无效，三小时汇报使用 UTC", flush=True)
+        report_tz = ZoneInfo("UTC")
+    while True:
+        now = datetime.now(report_tz)
+        next_hour = ((now.hour // 3) + 1) * 3
+        if next_hour >= 24:
+            target = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            target = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+        time.sleep(max(1, (target - now).total_seconds()))
+        end_at = datetime.now(report_tz).replace(minute=0, second=0, microsecond=0)
+        start_at = end_at - timedelta(hours=3)
+        counters = ARCHIVE_STORE.take_counters()
+        try:
+            report_text = three_hour_report_text(start_at, end_at, counters, report_tz)
+            ARCHIVE_STORE.send_report_snapshot(
+                report_text,
+                report_title="三小时运营汇报 " + start_at.strftime("%Y-%m-%d %H:%M"),
+            )
+            print("✅ 三小时运营汇报已发送：" + start_at.isoformat(), flush=True)
+        except Exception as exc:
+            for key, value in counters.items():
+                try:
+                    ARCHIVE_STORE.increment_counter(key, int(value or 0))
+                except Exception:
+                    pass
+            print("❌ 三小时运营汇报发送失败：", repr(exc), flush=True)
+
+
 def daily_report_loop():
     timezone_name = os.getenv("REPORT_TIMEZONE", "Asia/Shanghai")
     try:
@@ -1435,6 +1516,8 @@ def install_callback_safety():
             callback_id = str(call.id)
             answered_ids.discard(callback_id)
             try:
+                if ARCHIVE_STORE is not None:
+                    ARCHIVE_STORE.increment_counter("callback_interactions", 1)
                 return _handler(call, *args, **kwargs)
             except Exception as exc:
                 print("❌ 内联按钮处理失败：", callback_id, repr(exc), flush=True)
@@ -1464,7 +1547,25 @@ def install_callback_safety():
         entry["function"] = safe_handler
 
 
+def install_message_metrics():
+    """Count every handled inbound message; intentionally do not deduplicate users."""
+    for entry in bot.message_handlers:
+        original_handler = entry.get("function")
+        if not callable(original_handler) or getattr(original_handler, "_qingtian_metrics", False):
+            continue
+        def counted_handler(message, *args, _handler=original_handler, **kwargs):
+            if ARCHIVE_STORE is not None:
+                try:
+                    ARCHIVE_STORE.increment_counter("inbound_messages", 1)
+                except Exception as exc:
+                    print("⚠️ 接待计数更新失败：", repr(exc), flush=True)
+            return _handler(message, *args, **kwargs)
+        counted_handler._qingtian_metrics = True
+        entry["function"] = counted_handler
+
+
 install_callback_safety()
+install_message_metrics()
 
 
 if __name__ == "__main__":
@@ -1511,7 +1612,9 @@ if __name__ == "__main__":
                 archive_source_bundle()
             except Exception as archive_exc:
                 print("❌ 源码归档上传失败，不阻断机器人消息轮询：", repr(archive_exc), flush=True)
+            threading.Thread(target=ARCHIVE_STORE.flush_loop, args=(5,), name="archive-flush", daemon=True).start()
             threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
+            threading.Thread(target=three_hour_report_loop, name="three-hour-operations-report", daemon=True).start()
             threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
         try:
             bot.remove_webhook()
