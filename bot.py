@@ -58,11 +58,15 @@ def premium_button(text, **kwargs):
         key = "star"
     else:
         key = "star"
-    return types.InlineKeyboardButton(
-        text=label or "打开",
-        icon_custom_emoji_id=EMOJI[key],
-        **kwargs
-    )
+    # Optional button icons must never prevent the main menu from rendering.
+    try:
+        return types.InlineKeyboardButton(
+            text=label or "打开",
+            icon_custom_emoji_id=EMOJI[key],
+            **kwargs
+        )
+    except TypeError:
+        return types.InlineKeyboardButton(text=label or "打开", **kwargs)
 
 
 _EMOJI_CLUSTER_RE = re.compile(
@@ -378,11 +382,17 @@ def enforce_two_column_keyboard(kb):
     if not buttons:
         return kb
     if len(buttons) % 2:
-        buttons.append(types.InlineKeyboardButton(
-            text="返回主菜单",
-            callback_data="ui_buy",
-            icon_custom_emoji_id=EMOJI.get("gear")
-        ))
+        try:
+            back_button = types.InlineKeyboardButton(
+                text="返回主菜单",
+                callback_data="ui_buy",
+                icon_custom_emoji_id=EMOJI.get("gear")
+            )
+        except TypeError:
+            back_button = types.InlineKeyboardButton(
+                text="返回主菜单", callback_data="ui_buy"
+            )
+        buttons.append(back_button)
     kb.keyboard = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     return kb
 
@@ -395,7 +405,17 @@ def _send_message_with_premium_emoji(*args, **kwargs):
     if kwargs.get("reply_markup") is not None:
         kwargs["reply_markup"] = enforce_two_column_keyboard(kwargs["reply_markup"])
     kwargs.setdefault("parse_mode", "HTML")
-    return _original_send_message(*args, **kwargs)
+    try:
+        return _original_send_message(*args, **kwargs)
+    except Exception as exc:
+        markup = kwargs.get("reply_markup")
+        if markup is None or "icon_custom_emoji_id" not in str(exc):
+            raise
+        for row in getattr(markup, "keyboard", []):
+            for button in row:
+                if hasattr(button, "icon_custom_emoji_id"):
+                    button.icon_custom_emoji_id = None
+        return _original_send_message(*args, **kwargs)
 bot.send_message = _send_message_with_premium_emoji
 
 _original_edit_message_text = bot.edit_message_text
@@ -407,7 +427,17 @@ def _edit_message_text_two_columns(*args, **kwargs):
     elif "text" in kwargs:
         kwargs["text"] = premiumize_text(kwargs["text"])
     kwargs.setdefault("parse_mode", "HTML")
-    return _original_edit_message_text(*args, **kwargs)
+    try:
+        return _original_edit_message_text(*args, **kwargs)
+    except Exception as exc:
+        markup = kwargs.get("reply_markup")
+        if markup is None or "icon_custom_emoji_id" not in str(exc):
+            raise
+        for row in getattr(markup, "keyboard", []):
+            for button in row:
+                if hasattr(button, "icon_custom_emoji_id"):
+                    button.icon_custom_emoji_id = None
+        return _original_edit_message_text(*args, **kwargs)
 bot.edit_message_text = _edit_message_text_two_columns
 
 def safe_edit(bot, chat_id, msg_id, text, kb=None):
