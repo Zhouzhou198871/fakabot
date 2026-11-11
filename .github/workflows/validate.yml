@@ -25,3 +25,18 @@ jobs:
           assert "bot.edit_message_text = _edit_message_text_two_columns" in source
           print("Global two-column keyboard enforcement is wired.")
           PY
+
+      - name: Verify Telegram-only persistence wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          bot = Path("bot.py").read_text(encoding="utf-8")
+          store = Path("telegram_storage.py").read_text(encoding="utf-8")
+          assert "TelegramArchiveStore" in bot
+          assert "bot.infinity_polling(skip_pending=False" in bot
+          assert "self.bot.pin_chat_message" in store
+          assert "self.bot.download_file" in store
+          assert "os.remove(path)" in store
+          assert "open(path, \"w\"" not in bot
+          print("Telegram private-channel persistence wiring verified.")
+          PY
