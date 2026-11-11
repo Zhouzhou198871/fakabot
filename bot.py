@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import telebot, time, json, os, re, html
+import telebot, time, json, os, re, html, io, hashlib, zipfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from telebot import types
@@ -1222,6 +1222,90 @@ def wallet_manage(call):
     bot.answer_callback_query(call.id)
     render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
 
+def archive_source_bundle():
+    """Upload a source-only ZIP to the private archive channel, replacing the prior bundle."""
+    if ARCHIVE_STORE is None:
+        return False
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    excluded_dirs = {".git", "__pycache__", "venv", ".venv", "node_modules"}
+    allowed_extensions = {".py", ".txt", ".yml", ".yaml", ".md", ".toml", ".ini", ".cfg", ".sh"}
+    excluded_fragments = (".env", ".pem", ".key", "secret", "credential", "private_key")
+    files = []
+
+    for current_root, dirnames, filenames in os.walk(project_root):
+        dirnames[:] = sorted(name for name in dirnames if name not in excluded_dirs)
+        for filename in filenames:
+            relative_path = os.path.relpath(os.path.join(current_root, filename), project_root)
+            lowered = relative_path.lower()
+            extension = os.path.splitext(filename)[1].lower()
+            if extension not in allowed_extensions or any(item in lowered for item in excluded_fragments):
+                continue
+            full_path = os.path.join(current_root, filename)
+            try:
+                with open(full_path, "rb") as handle:
+                    files.append((relative_path.replace(os.sep, "/"), handle.read()))
+            except OSError as exc:
+                print("⚠️ 源码归档跳过无法读取的文件：", relative_path, repr(exc), flush=True)
+
+    files.sort(key=lambda item: item[0])
+    if not files:
+        print("⚠️ 源码归档未找到可上传的源文件", flush=True)
+        return False
+
+    digest = hashlib.sha256()
+    for relative_path, content in files:
+        digest.update(relative_path.encode("utf-8") + b"\\0" + content)
+    source_digest = digest.hexdigest()
+    meta = ARCHIVE_STORE.load("meta", {})
+    if meta.get("source_bundle_sha256") == source_digest:
+        return False
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative_path, content in files:
+            archive.writestr(relative_path, content)
+    buffer.seek(0)
+    buffer.name = "qingtian_fakabot_source.zip"
+    caption = (
+        "☀️ 晴天号铺 · 源码归档\n"
+        f"文件数量：{len(files)}\n"
+        f"SHA-256：<code>{source_digest}</code>\n"
+        "仅包含程序源文件与依赖清单；排除业务 JSON、环境变量、密钥、日志和运行缓存。"
+    )
+
+    previous_message_id = meta.get("source_bundle_message_id")
+    message_id = None
+    if previous_message_id:
+        try:
+            media = types.InputMediaDocument(media=buffer, caption=caption, parse_mode="HTML")
+            bot.edit_message_media(
+                media=media,
+                chat_id=ARCHIVE_CHAT_ID,
+                message_id=int(previous_message_id),
+            )
+            message_id = int(previous_message_id)
+        except Exception as exc:
+            print("⚠️ 更新源码归档消息失败，改为上传新文件：", repr(exc), flush=True)
+            buffer.seek(0)
+
+    if message_id is None:
+        message = bot.send_document(
+            ARCHIVE_CHAT_ID,
+            buffer,
+            caption=caption,
+            parse_mode="HTML",
+            disable_notification=True,
+        )
+        message_id = message.message_id
+
+    meta["source_bundle_sha256"] = source_digest
+    meta["source_bundle_message_id"] = message_id
+    ARCHIVE_STORE.save("meta", meta)
+    print("✅ 源码已批量归档至 Telegram 私密频道：", len(files), "个文件", flush=True)
+    return True
+
+
 def referral_reward_sync_loop():
     while True:
         try:
@@ -1361,6 +1445,10 @@ if __name__ == "__main__":
             "测试指令：/ping",
             disable_notification=True,
         )
+        try:
+            archive_source_bundle()
+        except Exception as archive_exc:
+            print("❌ 源码归档上传失败，不阻断机器人消息轮询：", repr(archive_exc), flush=True)
         threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
         threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
         bot.remove_webhook()
