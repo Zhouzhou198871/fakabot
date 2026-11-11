@@ -169,11 +169,22 @@ class PaymentWatcher:
 
     def _write_orders(self, orders):
         import json
-        from bot_storage import atomic_write_text
-        atomic_write_text(
-            self.orders_file,
-            json.dumps(orders, ensure_ascii=False, indent=2) + "\n"
-        )
+        directory = os.path.dirname(self.orders_file) or "."
+        import tempfile
+        fd, temp_path = tempfile.mkstemp(prefix=".orders_", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(orders, f, ensure_ascii=False, indent=2)
+                f.write("\\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.orders_file)
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
 
     def _pending_snapshot(self):
         with self.lock:
@@ -283,7 +294,9 @@ class PaymentWatcher:
                         "contract": token.get("address", "")
                     }
 
-                    if block_ms <= expires_ms and order.get("payment_status") == "pending":
+                    # A transfer broadcast before the deadline may be indexed/confirmed
+                    # after expiry. Its on-chain block timestamp decides whether it is timely.
+                    if block_ms <= expires_ms and order.get("payment_status") in ("pending", "expired"):
                         self.seen_txids.add(txid)
                         self.on_payment(order["order_id"], transfer)
                         break
