@@ -14,6 +14,7 @@ class FakeBot:
         self.messages = {}
         self.next_id = 1
         self.fail_send = False
+        self.fail_edit = False
 
     def get_chat(self, chat_id):
         return SimpleNamespace(type="channel", username=None, pinned_message=self.pinned_message)
@@ -33,6 +34,8 @@ class FakeBot:
         self.pinned_message = self.messages[message_id]
 
     def edit_message_media(self, media, chat_id, message_id):
+        if self.fail_edit:
+            raise RuntimeError("simulated Telegram edit outage")
         file_id = "file-edit-" + str(self.next_id)
         self.next_id += 1
         self.documents[file_id] = media.media.read()
@@ -83,6 +86,7 @@ class TelegramArchiveStoreTests(unittest.TestCase):
         store.initialize()
         store.save("users", {"123": {"balance": 2}})
         bot.fail_send = True
+        bot.fail_edit = True
         with self.assertRaises(RuntimeError):
             store.save("users", {"123": {"balance": 99}})
         self.assertEqual(store.load("users", {}), {"123": {"balance": 2}})
