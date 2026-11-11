@@ -284,10 +284,11 @@ def create_payment_order(user):
                     return None, old
 
         # Use a random 1..999999 micro-USDT suffix to distinguish concurrent payments.
+        # Never recycle an amount: a delayed payment for an expired order must
+        # never match a newer order with the same amount.
         used = {
             int(o["amount_raw"]) for o in orders
-            if o.get("payment_status") == "pending"
-            and int(o.get("expires_at_ms", 0)) > int(utc_now().timestamp() * 1000)
+            if str(o.get("amount_raw", "")).isdigit()
         }
         base_raw = amount_to_raw(PRODUCT_PRICE)
         for _ in range(10000):
@@ -402,7 +403,7 @@ def on_payment_confirmed(order_id, transfer):
 
 
 def deliver_paid_order(order_id):
-    """At-most-once delivery attempt: persist 'sending' before Telegram send."""
+    """At-most-once delivery attempt with a persisted reservation journal."""
     with FILE_LOCK:
         orders = load_json(ORDERS_FILE, list, [])
         order = next((o for o in orders if o.get("order_id") == order_id), None)
@@ -420,15 +421,21 @@ def deliver_paid_order(order_id):
             return
 
         card = stock[0]
+        # Persist reservation intent before stock mutation. Startup recovery
+        # removes this card if the process died between these two writes.
         order["delivery_status"] = "sending"
         order["delivery_started_at"] = iso_now()
         order["product"] = card
-        write_stock(stock[1:])
         atomic_write_json(ORDERS_FILE, orders)
+        try:
+            write_stock(stock[1:])
+        except Exception:
+            logger.exception("扣减库存失败；订单保持 sending，需管理员核查")
+            safe_send(ADMIN_ID, f"⚠️ 订单 {esc(order_id)} 已进入发货保留状态，但库存写入失败，请人工核查。")
+            return
         target_user_id = int(order["user_id"])
 
-    # Do not automatically resend after an ambiguous Telegram timeout:
-    # this avoids duplicate card delivery. Admin must reconcile 'sending' orders.
+    # An ambiguous Telegram timeout must not trigger an automatic resend.
     sent = safe_send(
         target_user_id,
         "🎉 <b>支付确认成功，自动发货完成！</b>\n\n"
@@ -451,6 +458,31 @@ def deliver_paid_order(order_id):
             f"⚠️ 订单 {esc(order_id)} 已扣库存，Telegram 发送结果不确定。"
             "为防重复发卡，系统未自动重发，请人工核查用户消息和库存。"
         )
+
+
+def reconcile_delivery_reservations():
+    """Recover a crash between persisting a delivery reservation and stock removal."""
+    with FILE_LOCK:
+        orders = load_json(ORDERS_FILE, list, [])
+        stock = read_stock()
+        changed = False
+        for order in orders:
+            if order.get("delivery_status") != "sending":
+                continue
+            card = order.get("product")
+            if card and card in stock:
+                stock.remove(card)
+                changed = True
+        if changed:
+            write_stock(stock)
+    # Never auto-resend ambiguous deliveries; ask admin to reconcile manually.
+    for order in orders:
+        if order.get("delivery_status") == "sending":
+            safe_send(
+                ADMIN_ID,
+                f"⚠️ 检测到待人工核查的发货记录：订单 <code>{esc(order.get('order_id'))}</code>。"
+                "请核对 Telegram 消息后处理，系统不会自动重复发卡。"
+            )
 
 
 def on_late_payment(order_id, transfer):
@@ -664,6 +696,7 @@ def admin_config_input(message):
 
 def main():
     ensure_files()
+    reconcile_delivery_reservations()
     watcher = PaymentWatcher(
         orders_file=ORDERS_FILE,
         lock_file=LOCK_FILE,
