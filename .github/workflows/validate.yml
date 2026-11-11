@@ -41,11 +41,11 @@ jobs:
           print("Telegram private-channel persistence wiring verified.")
           PY
 
-      - name: Test Telegram archive recovery and rollback
-        run: python -m unittest discover -s tests -v
-
       - name: Install bot dependencies
         run: pip install -r requirements.txt
+
+      - name: Test Telegram archive recovery and rollback
+        run: python -m unittest discover -s tests -v
 
       - name: Smoke-test bot menu construction
         env:
