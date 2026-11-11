@@ -284,15 +284,19 @@ def create_payment_order(user):
                     return None, old
 
         # Use a random 1..999999 micro-USDT suffix to distinguish concurrent payments.
-        # Never recycle an amount: a delayed payment for an expired order must
-        # never match a newer order with the same amount.
+        # Keep amounts unique across the recent 48-hour payment/reconciliation
+        # window. The random suffix is 0.000001..0.009999 USDT (max +0.01).
+        # A transfer from an older order cannot match a new order because its
+        # on-chain block timestamp must be >= the new order creation timestamp.
+        recent_cutoff = int((utc_now() - timedelta(hours=48)).timestamp() * 1000)
         used = {
             int(o["amount_raw"]) for o in orders
             if str(o.get("amount_raw", "")).isdigit()
+            and int(o.get("created_at_ms", 0)) >= recent_cutoff
         }
         base_raw = amount_to_raw(PRODUCT_PRICE)
         for _ in range(10000):
-            suffix = random.randint(1, 999999)
+            suffix = random.randint(1, 9999)
             amount_raw = base_raw + suffix
             if amount_raw not in used:
                 break
