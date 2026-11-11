@@ -581,14 +581,14 @@ def generate_main_text(user, uid):
     invited = int(user.get("invited_count", 0) or 0)
     bonus = float(user.get("invite_bonus", 0) or 0)
     return (
-        f'{premium_emoji("star", "✨")} <b>欢迎光临晴天号铺。</b>\\n\\n'
-        f'{premium_emoji("diamond", "📌")} <b>您的专属账户信息</b>\\n'
-        f'├ {premium_emoji("gear", "🆔")} <b>用户 ID：</b> <code>{uid}</code>\\n'
-        f'├ {premium_emoji("usdt", "💰")} <b>账户余额：</b> <b>{balance:.2f}</b> USDT\\n'
-        f'├ {premium_emoji("apple", "🛒")} <b>订单记录：</b> {orders} 单\\n'
-        f'├ {premium_emoji("tg", "👥")} <b>邀请用户：</b> {invited} 位\\n'
-        f'└ {premium_emoji("gift", "🎁")} <b>邀请奖励：</b> 累计 {bonus:.2f} USDT\\n\\n'
-        f'━━━━━━━━━━━━━━━━\\n'
+        f'{premium_emoji("star", "✨")} <b>欢迎光临晴天号铺。</b>\n\n'
+        f'{premium_emoji("diamond", "📌")} <b>您的专属账户信息</b>\n'
+        f'├ {premium_emoji("gear", "🆔")} <b>用户 ID：</b> <code>{uid}</code>\n'
+        f'├ {premium_emoji("usdt", "💰")} <b>账户余额：</b> <b>{balance:.2f}</b> USDT\n'
+        f'├ {premium_emoji("apple", "🛒")} <b>订单记录：</b> {orders} 单\n'
+        f'├ {premium_emoji("tg", "👥")} <b>邀请用户：</b> {invited} 位\n'
+        f'└ {premium_emoji("gift", "🎁")} <b>邀请奖励：</b> 累计 {bonus:.2f} USDT\n\n'
+        f'━━━━━━━━━━━━━━━━\n'
         f'{premium_emoji("star", "🛒")} <b>自助选购</b>：点击下方按钮即可挑选。'
     )
 
@@ -1458,6 +1458,7 @@ def install_callback_safety():
                         bot.answer_callback_query(call.id)
                     except Exception as answer_exc:
                         print("⚠️ 按钮回执发送失败：", repr(answer_exc), flush=True)
+                answered_ids.discard(callback_id)
 
         safe_handler._qingtian_safe = True
         entry["function"] = safe_handler
