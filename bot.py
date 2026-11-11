@@ -409,7 +409,12 @@ def _send_message_with_premium_emoji(*args, **kwargs):
         return _original_send_message(*args, **kwargs)
     except Exception as exc:
         markup = kwargs.get("reply_markup")
-        if markup is None or "icon_custom_emoji_id" not in str(exc):
+        error_text = str(exc).lower()
+        icon_error = any(token in error_text for token in (
+            "icon_custom_emoji_id", "button_icon_invalid",
+            "button_icon_emoji_not_allowed", "custom emoji", "button icon"
+        ))
+        if markup is None or not icon_error:
             raise
         for row in getattr(markup, "keyboard", []):
             for button in row:
@@ -431,7 +436,12 @@ def _edit_message_text_two_columns(*args, **kwargs):
         return _original_edit_message_text(*args, **kwargs)
     except Exception as exc:
         markup = kwargs.get("reply_markup")
-        if markup is None or "icon_custom_emoji_id" not in str(exc):
+        error_text = str(exc).lower()
+        icon_error = any(token in error_text for token in (
+            "icon_custom_emoji_id", "button_icon_invalid",
+            "button_icon_emoji_not_allowed", "custom emoji", "button icon"
+        ))
+        if markup is None or not icon_error:
             raise
         for row in getattr(markup, "keyboard", []):
             for button in row:
