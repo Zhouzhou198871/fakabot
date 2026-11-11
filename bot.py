@@ -84,16 +84,16 @@ def get_main_kb():
     """主界面：账号与节点合并为账号商城，严格两列三行。"""
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
-        types.InlineKeyboardButton("账号商城", callback_data="cat_account", icon_custom_emoji_id=EMOJI["diamond"]),
-        types.InlineKeyboardButton("历史订单", callback_data="ui_orders", icon_custom_emoji_id=EMOJI["gear"])
+        types.InlineKeyboardButton("账号商城", callback_data="cat_account"),
+        types.InlineKeyboardButton("历史订单", callback_data="ui_orders")
     )
     kb.row(
-        types.InlineKeyboardButton("邀请奖励", callback_data="ui_invite", icon_custom_emoji_id=EMOJI["gift"]),
-        types.InlineKeyboardButton("充值", callback_data="ui_recharge", icon_custom_emoji_id=EMOJI["usdt"])
+        types.InlineKeyboardButton("邀请奖励", callback_data="ui_invite"),
+        types.InlineKeyboardButton("充值", callback_data="ui_recharge")
     )
     kb.row(
-        types.InlineKeyboardButton("使用帮助", callback_data="ui_help", icon_custom_emoji_id=EMOJI["star"]),
-        types.InlineKeyboardButton("更多服务", callback_data="more_services", icon_custom_emoji_id=EMOJI["node"])
+        types.InlineKeyboardButton("使用帮助", callback_data="ui_help"),
+        types.InlineKeyboardButton("更多服务", callback_data="more_services")
     )
     return kb
 def get_more_kb():
@@ -114,8 +114,8 @@ def get_more_kb():
 
 def get_account_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("苹果ID", callback_data="list_apple", icon_custom_emoji_id=EMOJI["apple"]), types.InlineKeyboardButton("TG账号", callback_data="list_tg", icon_custom_emoji_id=EMOJI["tg"]))
-    kb.add(types.InlineKeyboardButton("AI 专区", callback_data="list_ai", icon_custom_emoji_id=EMOJI["ai"]), types.InlineKeyboardButton("影音游戏", callback_data="list_video", icon_custom_emoji_id=EMOJI["video"]))
+    kb.add(types.InlineKeyboardButton("苹果ID", callback_data="list_apple"), types.InlineKeyboardButton("TG账号", callback_data="list_tg"))
+    kb.add(types.InlineKeyboardButton("AI 专区", callback_data="list_ai"), types.InlineKeyboardButton("影音游戏", callback_data="list_video"))
     kb.add(types.InlineKeyboardButton("🔙 返回主菜单", callback_data="ui_buy"))
     return kb
 
@@ -265,5 +265,15 @@ def show_recharge(call):
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
 if __name__ == "__main__":
-    print("🔥 包含完整数据的最终版已启动...")
-    bot.polling(non_stop=True)
+    print("🤖 晴天号铺机器人启动中...", flush=True)
+    try:
+        bot.remove_webhook()
+        print("✅ Webhook 已清理，开始 long polling", flush=True)
+        bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
+    except KeyboardInterrupt:
+        print("🛑 收到停止信号，机器人退出", flush=True)
+    except Exception as exc:
+        import traceback
+        print("❌ 机器人 polling 异常：", repr(exc), flush=True)
+        traceback.print_exc()
+        raise
