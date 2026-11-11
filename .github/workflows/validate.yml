@@ -58,6 +58,7 @@ jobs:
           assert all(len(row) == 2 for row in keyboard.keyboard)
           assert all(button.callback_data for row in keyboard.keyboard for button in row)
           print("Bot import and six-button main menu construction passed.")
+          PY
 
       - name: Verify Premium emoji rejection fallback
         env:
@@ -100,5 +101,4 @@ jobs:
               print("Premium text and button icon rejection fallbacks passed.")
           finally:
               bot._original_send_message = original
-          PY
           PY
