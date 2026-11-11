@@ -23,6 +23,7 @@ class TelegramArchiveStore:
         self.lock = threading.RLock()
         self.data = {"schema_version": 1, "users": {}, "orders": [], "withdrawals": [], "meta": {}}
         self.initialized = False
+        self.archive_message_id = None
 
     def _get_pinned_snapshot(self):
         chat = self.bot.get_chat(self.chat_id)
@@ -34,6 +35,7 @@ class TelegramArchiveStore:
         document = getattr(pinned, "document", None) if pinned else None
         if not document:
             return None
+        self.archive_message_id = getattr(pinned, "message_id", None)
         file_info = self.bot.get_file(document.file_id)
         raw = self.bot.download_file(file_info.file_path)
         payload = json.loads(raw.decode("utf-8"))
@@ -123,6 +125,23 @@ class TelegramArchiveStore:
             f"用户档案：{users} 条 · 订单记录：{orders} 条 · 提现记录：{withdrawals} 条\n"
             "说明：完整业务数据见本条 JSON 附件；请勿转发。"
         )
+        # Reuse one pinned archive message instead of spamming a new file per update.
+        if self.archive_message_id is not None:
+            editor = getattr(self.bot, "edit_message_media", None)
+            if callable(editor):
+                try:
+                    from telebot import types
+                    media = types.InputMediaDocument(media=buffer, caption=caption)
+                    editor(
+                        media=media,
+                        chat_id=self.chat_id,
+                        message_id=self.archive_message_id,
+                    )
+                    return
+                except Exception as exc:
+                    print("Telegram archive edit failed; creating replacement:", repr(exc), flush=True)
+                    buffer.seek(0)
+
         message = self.bot.send_document(
             self.chat_id,
             buffer,
@@ -134,3 +153,4 @@ class TelegramArchiveStore:
             message.message_id,
             disable_notification=True,
         )
+        self.archive_message_id = message.message_id
