@@ -62,6 +62,12 @@ class TelegramArchiveStore:
             existing = self._get_pinned_snapshot()
             if existing is not None:
                 self.data = existing
+                # The pinned Telegram snapshot is authoritative. Remove any
+                # leftover legacy files only after the archive was downloaded
+                # and validated successfully.
+                for path in self.legacy_paths.values():
+                    if path and os.path.isfile(path):
+                        os.remove(path)
                 self.initialized = True
                 return
             # One-time migration: keep legacy files until Telegram confirms the
