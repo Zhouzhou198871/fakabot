@@ -21,9 +21,12 @@ class TelegramArchiveStore:
         self.chat_id = int(chat_id)
         self.legacy_paths = dict(legacy_paths or {})
         self.lock = threading.RLock()
+        self.persist_lock = threading.Lock()
         self.data = {"schema_version": 1, "users": {}, "orders": [], "withdrawals": [], "meta": {}}
         self.initialized = False
         self.archive_message_id = None
+        self.dirty = False
+        self.version = 0
 
     def _get_pinned_snapshot(self):
         chat = self.bot.get_chat(self.chat_id)
@@ -101,13 +104,52 @@ class TelegramArchiveStore:
         with self.lock:
             if not self.initialized:
                 raise RuntimeError("Telegram 归档存储尚未初始化")
-            previous = self.data.get(key)
             self.data[key] = copy.deepcopy(value)
+            self.version += 1
+            self.dirty = True
+
+    def increment_counter(self, name, amount=1):
+        """Atomically increment a lightweight operational counter without network I/O."""
+        with self.lock:
+            if not self.initialized:
+                raise RuntimeError("Telegram 归档存储尚未初始化")
+            meta = self.data.setdefault("meta", {})
+            counters = meta.setdefault("metrics_counters", {})
+            counters[str(name)] = int(counters.get(str(name), 0) or 0) + int(amount)
+            self.version += 1
+            self.dirty = True
+
+    def take_counters(self):
+        """Atomically read and reset interval counters."""
+        with self.lock:
+            meta = self.data.setdefault("meta", {})
+            counters = dict(meta.get("metrics_counters", {}))
+            meta["metrics_counters"] = {}
+            self.version += 1
+            self.dirty = True
+            return counters
+
+    def flush(self, reason="定时归档"):
+        """Persist a consistent snapshot without blocking readers/writers on Telegram network I/O."""
+        with self.persist_lock:
+            with self.lock:
+                if not self.initialized or not self.dirty:
+                    return False
+                snapshot = copy.deepcopy(self.data)
+                version = self.version
+            self._persist_snapshot(snapshot, reason)
+            with self.lock:
+                if self.version == version:
+                    self.dirty = False
+            return True
+
+    def flush_loop(self, interval=5):
+        while True:
             try:
-                self._persist("数据更新 / " + key)
-            except Exception:
-                self.data[key] = previous
-                raise
+                self.flush()
+            except Exception as exc:
+                print("Telegram archive background flush failed:", repr(exc), flush=True)
+            time.sleep(max(1, int(interval)))
 
     def send_report_snapshot(self, report_text, report_title="工作汇报"):
         """Publish a human-readable report together with the matching business-data JSON."""
@@ -132,7 +174,12 @@ class TelegramArchiveStore:
             )
 
     def _persist(self, reason):
-        snapshot = dict(self.data)
+        with self.lock:
+            snapshot = copy.deepcopy(self.data)
+        self._persist_snapshot(snapshot, reason)
+
+    def _persist_snapshot(self, snapshot, reason):
+        snapshot = copy.deepcopy(snapshot)
         snapshot["updated_at"] = datetime.now(timezone.utc).isoformat()
         encoded = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         buffer = io.BytesIO(encoded)
