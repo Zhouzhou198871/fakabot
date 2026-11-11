@@ -1450,15 +1450,17 @@ if __name__ == "__main__":
         # Startup notifications and source archiving are auxiliary; never block polling.
         try:
             me = bot.get_me()
-            bot.send_message(
-                ARCHIVE_CHAT_ID,
+            startup_report = (
                 "☀️ 晴天号铺 · 启动工作汇报\n"
                 f"机器人：@{me.username or 'unknown'}\n"
                 f"启动时间：{datetime.now().astimezone().isoformat(timespec='seconds')}\n"
                 "状态：机器人正在启动消息轮询。\n"
-                "测试指令：/ping",
-                disable_notification=True,
+                "测试指令：/ping"
             )
+            if archive_ready:
+                ARCHIVE_STORE.send_report_snapshot(startup_report, report_title="启动汇报")
+            else:
+                bot.send_message(ARCHIVE_CHAT_ID, startup_report, disable_notification=True)
         except Exception as report_exc:
             print("⚠️ 启动汇报发送失败，不影响机器人轮询：", repr(report_exc), flush=True)
         if archive_ready:
