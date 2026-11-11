@@ -564,6 +564,17 @@ def generate_main_text(user, uid):
         f'<b>请选择下方菜单，开始选购吧：</b>'
     )
 
+@bot.message_handler(commands=['ping'])
+def cmd_ping(message):
+    """Small live-response probe for checking Telegram polling and outbound replies."""
+    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    bot.send_message(
+        message.chat.id,
+        f"晴天号铺在线。\n响应时间：<code>{now}</code>\n主菜单交互已就绪。",
+        reply_markup=get_main_kb(),
+    )
+
+
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     display_name = " ".join(part for part in [message.from_user.first_name, message.from_user.last_name] if part).strip() or "老板"
@@ -1302,6 +1313,16 @@ if __name__ == "__main__":
         )
         ARCHIVE_STORE.initialize()
         print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
+        me = bot.get_me()
+        bot.send_message(
+            ARCHIVE_CHAT_ID,
+            "☀️ 晴天号铺 · 启动工作汇报\n"
+            f"机器人：@{me.username or 'unknown'}\n"
+            f"启动时间：{datetime.now().astimezone().isoformat(timespec='seconds')}\n"
+            "状态：归档连接成功，消息轮询即将启动。\n"
+            "测试指令：/ping",
+            disable_notification=True,
+        )
         threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
         threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
         bot.remove_webhook()
