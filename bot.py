@@ -323,6 +323,12 @@ def create_payment_order(user):
         return order, None
 
 
+def payment_keyboard(order):
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔄 刷新支付状态 / 倒计时", callback_data=f"paycheck:{order['order_id']}"))
+    return kb
+
+
 def payment_message(order):
     return (
         "💳 <b>USDT 订单已创建</b>\n\n"
@@ -347,10 +353,14 @@ def buy_callback(call):
         if existing:
             bot.send_message(
                 call.message.chat.id,
-                "⚠️ <b>你已有待支付订单。</b>\n\n" + payment_message(existing)
+                "⚠️ <b>你已有待支付订单。</b>\n\n" + payment_message(existing),
+                reply_markup=payment_keyboard(existing)
             )
             return
-        bot.send_message(call.message.chat.id, payment_message(order))
+        bot.send_message(
+            call.message.chat.id, payment_message(order),
+            reply_markup=payment_keyboard(order)
+        )
     except Exception:
         logger.exception("创建支付订单失败")
         safe_send(call.message.chat.id, "创建订单失败，请稍后重试或联系客服。")
@@ -372,7 +382,11 @@ def update_order(order_id, mutator):
 def on_payment_confirmed(order_id, transfer):
     """Called only for a confirmed, exact-amount, in-window transfer."""
     def mark_paid(order):
-        if order.get("payment_status") != "pending":
+        # Accept an order already marked expired only when watcher has verified
+        # the chain block timestamp is still within the original payment window.
+        if order.get("payment_status") not in ("pending", "expired"):
+            return
+        if int(transfer.get("block_timestamp_ms", 0)) > int(order.get("expires_at_ms", 0)):
             return
         order["payment_status"] = "paid"
         order["status"] = "paid"
@@ -463,6 +477,67 @@ def on_order_expired(order_id):
     if order:
         safe_send(int(order["user_id"]), f"⌛ 订单 <code>{esc(order_id)}</code> 已过期，请重新下单。")
 
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("paycheck:"))
+def payment_status_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        order_id = call.data.split(":", 1)[1]
+        orders = read_json(ORDERS_FILE, list, [])
+        order = next(
+            (o for o in orders
+             if o.get("order_id") == order_id and int(o.get("user_id", 0)) == call.from_user.id),
+            None
+        )
+        if not order:
+            bot.send_message(call.message.chat.id, "找不到该订单。")
+            return
+        status = order.get("payment_status", "unknown")
+        if status == "pending":
+            remaining = max(0, int((int(order["expires_at_ms"]) - int(utc_now().timestamp() * 1000)) / 1000))
+            mins, secs = divmod(remaining, 60)
+            bot.send_message(
+                call.message.chat.id,
+                f"⏳ 订单仍待支付，剩余时间：<b>{mins:02d}:{secs:02d}</b>。"
+            )
+        elif status == "paid":
+            bot.send_message(call.message.chat.id, "✅ 已确认到账，正在处理发货。")
+        elif status == "expired":
+            bot.send_message(call.message.chat.id, "⌛ 订单已过期，请重新下单。")
+        elif status == "paid_late":
+            bot.send_message(call.message.chat.id, "⚠️ 检测到超时到账，已转人工核查，请联系客服。")
+        else:
+            bot.send_message(call.message.chat.id, f"订单状态：{esc(status)}")
+    except Exception:
+        logger.exception("支付状态查询失败")
+        safe_send(call.message.chat.id, "暂时无法查询支付状态，请稍后重试。")
+
+
+@bot.message_handler(commands=["paystatus"])
+def paystatus_command(message):
+    try:
+        orders = read_json(ORDERS_FILE, list, [])
+        pending = [
+            o for o in orders
+            if int(o.get("user_id", 0)) == message.from_user.id
+            and o.get("payment_status") == "pending"
+        ]
+        if not pending:
+            safe_send(message.chat.id, "当前没有待支付订单。")
+            return
+        order = max(pending, key=lambda o: o.get("created_at", ""))
+        remaining = max(0, int((int(order["expires_at_ms"]) - int(utc_now().timestamp() * 1000)) / 1000))
+        mins, secs = divmod(remaining, 60)
+        safe_send(
+            message.chat.id,
+            f"🧾 订单：<code>{esc(order['order_id'])}</code>\n"
+            f"💰 应付：<b>{esc(order['amount'])} USDT</b>\n"
+            f"⏳ 剩余：<b>{mins:02d}:{secs:02d}</b>"
+        )
+    except Exception:
+        logger.exception("/paystatus failed")
+        safe_send(message.chat.id, "查询失败，请稍后重试。")
 
 # -------------------- orders --------------------
 
