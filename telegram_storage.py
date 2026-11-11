@@ -93,7 +93,7 @@ class TelegramArchiveStore:
     def save(self, key, value):
         if key not in self.KEYS:
             raise ValueError("未知归档数据类型：" + str(key))
-        expected = dict if key == "users" else list
+        expected = dict if key in ("users", "meta") else list
         if not isinstance(value, expected):
             raise TypeError(key + " 数据类型不正确")
         with self.lock:
