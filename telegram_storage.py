@@ -14,14 +14,14 @@ from datetime import datetime, timezone
 
 
 class TelegramArchiveStore:
-    KEYS = ("users", "orders", "withdrawals")
+    KEYS = ("users", "orders", "withdrawals", "meta")
 
     def __init__(self, bot, chat_id, legacy_paths=None):
         self.bot = bot
         self.chat_id = int(chat_id)
         self.legacy_paths = dict(legacy_paths or {})
         self.lock = threading.RLock()
-        self.data = {"schema_version": 1, "users": {}, "orders": [], "withdrawals": []}
+        self.data = {"schema_version": 1, "users": {}, "orders": [], "withdrawals": [], "meta": {}}
         self.initialized = False
 
     def _get_pinned_snapshot(self):
@@ -35,7 +35,7 @@ class TelegramArchiveStore:
         payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict) or payload.get("schema_version") != 1:
             raise RuntimeError("频道置顶归档文件格式不受支持；为防止覆盖旧数据，已停止启动")
-        for key, default in (("users", {}), ("orders", []), ("withdrawals", [])):
+        for key, default in (("users", {}), ("orders", []), ("withdrawals", []), ("meta", {})):
             value = payload.get(key, default)
             if not isinstance(value, type(default)):
                 raise RuntimeError("频道归档数据结构异常：" + key)
@@ -48,7 +48,7 @@ class TelegramArchiveStore:
             if path and os.path.isfile(path):
                 with open(path, "r", encoding="utf-8") as handle:
                     value = json.load(handle)
-                expected = dict if key == "users" else list
+                expected = dict if key in ("users", "meta") else list
                 if not isinstance(value, expected):
                     raise RuntimeError("旧数据格式异常，拒绝迁移：" + key)
                 imported[key] = value
