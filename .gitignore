@@ -2,3 +2,4 @@ users.json
 *.log
 __pycache__/
 venv/
+orders.json\nwithdrawals.json\n
