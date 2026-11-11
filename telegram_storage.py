@@ -1,0 +1,126 @@
+# -*- coding: utf-8 -*-
+"""Telegram private-channel snapshot storage.
+
+Business data is held in process memory only and durably snapshotted as a JSON
+document in a private Telegram channel. The latest document is pinned so the
+Bot API can recover it after restart without local database/files.
+"""
+import copy
+import io
+import json
+import os
+import threading
+from datetime import datetime, timezone
+
+
+class TelegramArchiveStore:
+    KEYS = ("users", "orders", "withdrawals")
+
+    def __init__(self, bot, chat_id, legacy_paths=None):
+        self.bot = bot
+        self.chat_id = int(chat_id)
+        self.legacy_paths = dict(legacy_paths or {})
+        self.lock = threading.RLock()
+        self.data = {"schema_version": 1, "users": {}, "orders": [], "withdrawals": []}
+        self.initialized = False
+
+    def _get_pinned_snapshot(self):
+        chat = self.bot.get_chat(self.chat_id)
+        pinned = getattr(chat, "pinned_message", None)
+        document = getattr(pinned, "document", None) if pinned else None
+        if not document:
+            return None
+        file_info = self.bot.get_file(document.file_id)
+        raw = self.bot.download_file(file_info.file_path)
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            raise RuntimeError("频道置顶归档文件格式不受支持；为防止覆盖旧数据，已停止启动")
+        for key, default in (("users", {}), ("orders", []), ("withdrawals", [])):
+            value = payload.get(key, default)
+            if not isinstance(value, type(default)):
+                raise RuntimeError("频道归档数据结构异常：" + key)
+        return payload
+
+    def _legacy_snapshot(self):
+        imported = {}
+        found = False
+        for key, path in self.legacy_paths.items():
+            if path and os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as handle:
+                    value = json.load(handle)
+                expected = dict if key == "users" else list
+                if not isinstance(value, expected):
+                    raise RuntimeError("旧数据格式异常，拒绝迁移：" + key)
+                imported[key] = value
+                found = True
+        if found:
+            self.data.update(imported)
+        return found
+
+    def initialize(self):
+        with self.lock:
+            existing = self._get_pinned_snapshot()
+            if existing is not None:
+                self.data = existing
+                self.initialized = True
+                return
+            # One-time migration: keep legacy files until Telegram confirms the
+            # snapshot upload AND pin. Then remove only the successfully migrated files.
+            self._legacy_snapshot()
+            self._persist("初始化 / 旧数据迁移")
+            for path in self.legacy_paths.values():
+                if path and os.path.isfile(path):
+                    os.remove(path)
+            self.initialized = True
+
+    def load(self, key, default):
+        with self.lock:
+            if not self.initialized:
+                raise RuntimeError("Telegram 归档存储尚未初始化")
+            value = self.data.get(key, default)
+            return copy.deepcopy(value)
+
+    def save(self, key, value):
+        if key not in self.KEYS:
+            raise ValueError("未知归档数据类型：" + str(key))
+        expected = dict if key == "users" else list
+        if not isinstance(value, expected):
+            raise TypeError(key + " 数据类型不正确")
+        with self.lock:
+            if not self.initialized:
+                raise RuntimeError("Telegram 归档存储尚未初始化")
+            previous = self.data.get(key)
+            self.data[key] = copy.deepcopy(value)
+            try:
+                self._persist("数据更新 / " + key)
+            except Exception:
+                self.data[key] = previous
+                raise
+
+    def _persist(self, reason):
+        snapshot = dict(self.data)
+        snapshot["updated_at"] = datetime.now(timezone.utc).isoformat()
+        encoded = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        buffer = io.BytesIO(encoded)
+        buffer.name = "qingtian_business_archive.json"
+        users = len(snapshot.get("users", {}))
+        orders = len(snapshot.get("orders", []))
+        withdrawals = len(snapshot.get("withdrawals", []))
+        caption = (
+            "☀️ 晴天号铺 · 数据归档工作汇报\n"
+            "状态：归档快照已生成\n"
+            "更新模块：" + reason + "\n"
+            f"用户档案：{users} 条 · 订单记录：{orders} 条 · 提现记录：{withdrawals} 条\n"
+            "说明：完整业务数据见本条 JSON 附件；请勿转发。"
+        )
+        message = self.bot.send_document(
+            self.chat_id,
+            buffer,
+            caption=caption,
+            disable_notification=True,
+        )
+        self.bot.pin_chat_message(
+            self.chat_id,
+            message.message_id,
+            disable_notification=True,
+        )
