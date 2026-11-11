@@ -118,9 +118,17 @@ def get_user(uid, name=""):
     with open(USERS_FILE, "r", encoding="utf-8") as f: users = json.load(f)
     uid_str = str(uid)
     if uid_str not in users:
-        users[uid_str] = {"name": name, "join_time": time.time(), "balance": 0.0, "orders_count": 0, "invited_count": 0, "invite_bonus": 0.0}
+        users[uid_str] = {"name": name, "join_time": time.time(), "balance": 0.0, "orders_count": 0, "invited_count": 0, "invite_bonus": 0.0, "language": "zh"}
         with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump(users, f, ensure_ascii=False, indent=2)
+    users[uid_str].setdefault("language", "zh")
     return users[uid_str]
+
+def set_user_language(uid, language):
+    with open(USERS_FILE, "r", encoding="utf-8") as f:
+        users = json.load(f)
+    users.setdefault(str(uid), {})["language"] = language
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
 
 def safe_edit(bot, chat_id, msg_id, text, kb=None):
     try: bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text, parse_mode="HTML", reply_markup=kb)
@@ -142,20 +150,34 @@ def get_main_kb():
         premium_button("更多服务", callback_data="more_services")
     )
     return kb
-def get_more_kb():
+def get_more_kb(language="zh"):
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.row(
-        premium_button("📢 节点交流群", url="https://t.me/qingtian_vip"),
-        premium_button("📢 代理频道", url="https://t.me/jiedian888")
-    )
-    kb.row(
-        premium_button("📢 账号铺频道", url="https://t.me/qingtian_tutorial"),
-        premium_button("💬 联系客服", callback_data="show_support")
-    )
-    kb.row(
-        premium_button("🔙 返回", callback_data="ui_buy"),
-        premium_button("☀️ 晴天", callback_data="ui_buy")
-    )
+    if language == "en":
+        kb.row(
+            premium_button("Node Community", url="https://t.me/qingtian_vip"),
+            premium_button("Proxy Channel", url="https://t.me/jiedian888")
+        )
+        kb.row(
+            premium_button("Account Store News", url="https://t.me/qingtian_tutorial"),
+            premium_button("Contact Support", callback_data="show_support")
+        )
+        kb.row(
+            premium_button("Back", callback_data="ui_buy"),
+            premium_button("中文", callback_data="lang_zh")
+        )
+    else:
+        kb.row(
+            premium_button("节点交流群", url="https://t.me/qingtian_vip"),
+            premium_button("代理频道", url="https://t.me/jiedian888")
+        )
+        kb.row(
+            premium_button("账号铺频道", url="https://t.me/qingtian_tutorial"),
+            premium_button("联系客服", callback_data="show_support")
+        )
+        kb.row(
+            premium_button("返回主菜单", callback_data="ui_buy"),
+            premium_button("English", callback_data="lang_en")
+        )
     return kb
 
 def get_account_kb():
@@ -228,27 +250,126 @@ def show_main_menu(call):
 @bot.callback_query_handler(func=lambda call: call.data == "more_services")
 def show_more_menu(call):
     bot.answer_callback_query(call.id)
-    text = "加入官方社群，获取最新动态。\n如有任何疑问，请随时联系客服为您解答。\n\n👇 请选择需要的服务："
-    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_more_kb())
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    if language == "en":
+        text = (
+            "☀️ <b>QINGTIAN DIGITAL SERVICES</b>\\n"
+            "<i>Your trusted gateway to digital products and online services.</i>\\n\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            "💎 <b>Explore Our Services</b>\\n"
+            "• <b>Node Community</b> — connect with users, exchange setup tips and stay informed about service updates.\\n"
+            "• <b>Proxy Channel</b> — follow announcements, availability and product updates.\\n"
+            "• <b>Account Store</b> — discover new digital account products and store notices.\\n\\n"
+            "🛡 <b>Service Commitment</b>\\n"
+            "We aim to provide clear product information, convenient self-service purchasing and responsive after-sales assistance. Please review each product description before ordering.\\n\\n"
+            "🤝 <b>Need a hand?</b>\\n"
+            "Our support team can help with order questions, product guidance and basic troubleshooting. Choose a service below to continue."
+        )
+    else:
+        text = (
+            "☀️ <b>晴天 · 数字生活服务中心</b>\\n"
+            "<i>让数字商品选购更简单，让每一次服务都有清晰指引。</i>\\n\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            "💎 <b>官方服务矩阵</b>\\n"
+            "• <b>节点交流群</b> — 与用户交流使用经验，获取配置建议及社群动态。\\n"
+            "• <b>代理资讯频道</b> — 关注服务公告、产品动态与重要通知。\\n"
+            "• <b>账号铺频道</b> — 浏览数字账号商品资讯、上新消息与使用提醒。\\n\\n"
+            "🛡 <b>服务与保障</b>\\n"
+            "我们持续完善商品信息展示、自助选购流程与售后沟通渠道。下单前请仔细阅读商品规格、适用范围及使用说明；如遇订单或使用问题，可通过官方客服获得协助。\\n\\n"
+            "🤝 <b>专属服务支持</b>\\n"
+            "无论是商品咨询、订单查询，还是基础使用指引，都可以进入客服页面联系人工团队。请选择下方对应入口。"
+        )
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_more_kb(language))
+
+@bot.callback_query_handler(func=lambda call: call.data in ("lang_en", "lang_zh"))
+def switch_language(call):
+    language = "en" if call.data == "lang_en" else "zh"
+    user = get_user(call.from_user.id)
+    set_user_language(call.from_user.id, language)
+    bot.answer_callback_query(call.id, "Language: English" if language == "en" else "已切换为简体中文")
+    if language == "en":
+        text = (
+            "☀️ <b>QINGTIAN DIGITAL SERVICES</b>\\n"
+            "<i>Your trusted gateway to digital products and online services.</i>\\n\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            "💎 <b>Explore Our Services</b>\\n"
+            "• <b>Node Community</b> — connect with users, exchange setup tips and stay informed about service updates.\\n"
+            "• <b>Proxy Channel</b> — follow announcements, availability and product updates.\\n"
+            "• <b>Account Store</b> — discover new digital account products and store notices.\\n\\n"
+            "🛡 <b>Service Commitment</b>\\n"
+            "We aim to provide clear product information, convenient self-service purchasing and responsive after-sales assistance. Please review each product description before ordering.\\n\\n"
+            "🤝 <b>Need a hand?</b>\\n"
+            "Our support team can help with order questions, product guidance and basic troubleshooting. Choose a service below to continue."
+        )
+    else:
+        text = (
+            "☀️ <b>晴天 · 数字生活服务中心</b>\\n"
+            "<i>让数字商品选购更简单，让每一次服务都有清晰指引。</i>\\n\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            "💎 <b>官方服务矩阵</b>\\n"
+            "• <b>节点交流群</b> — 与用户交流使用经验，获取配置建议及社群动态。\\n"
+            "• <b>代理资讯频道</b> — 关注服务公告、产品动态与重要通知。\\n"
+            "• <b>账号铺频道</b> — 浏览数字账号商品资讯、上新消息与使用提醒。\\n\\n"
+            "🛡 <b>服务与保障</b>\\n"
+            "我们持续完善商品信息展示、自助选购流程与售后沟通渠道。下单前请仔细阅读商品规格、适用范围及使用说明；如遇订单或使用问题，可通过官方客服获得协助。\\n\\n"
+            "🤝 <b>专属服务支持</b>\\n"
+            "无论是商品咨询、订单查询，还是基础使用指引，都可以进入客服页面联系人工团队。请选择下方对应入口。"
+        )
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_more_kb(language))
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_support")
 def show_support(call):
     bot.answer_callback_query(call.id)
-    text = "如果在购买或使用过程中遇到任何问题，请点击下方按钮联系人工客服。\n\n⏰ <b>客服在线时间：</b> 09:00 - 24:00"
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.row(
-        premium_button("👨‍💻 主客服 @qingtian_Boss", url="https://t.me/qingtian_Boss"),
-        premium_button("🔙 返回", callback_data="more_services")
-    )
-    try: bot.delete_message(call.message.chat.id, call.message.message_id)
-    except: pass
-
-    photos = bot.get_user_profile_photos(call.bot.id, limit=1)
-    if photos.total_count > 0:
-        file_id = photos.photos[0][-1].file_id
-        bot.send_photo(call.message.chat.id, file_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    if language == "en":
+        text = (
+            "💬 <b>OFFICIAL CUSTOMER SUPPORT</b>\\n"
+            "<i>Personal assistance from the QingTian support account.</i>\\n\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            "👤 <b>Support account preview</b>\\n"
+            "Account: <b>@qingtian_Boss</b>\\n"
+            "Channel: Telegram direct message\\n\\n"
+            "📌 <b>What we can help with</b>\\n"
+            "• Product details and pre-purchase questions\\n"
+            "• Order status and delivery assistance\\n"
+            "• Basic usage guidance and after-sales questions\\n\\n"
+            "Please include your order number and a short description when contacting support. Never share your password or verification code."
+        )
+        contact_label, back_label = "Open support chat", "Back to services"
     else:
-        bot.send_message(call.message.chat.id, "💬 <b>联系客服</b>\n" + text, parse_mode="HTML", reply_markup=kb)
+        text = (
+            "💬 <b>晴天官方人工客服</b>\\n"
+            "<i>为您提供清晰、及时的订单与商品咨询支持。</i>\\n\\n"
+            "━━━━━━━━━━━━━━━━━━\\n"
+            "👤 <b>客服账号预览</b>\\n"
+            "账号名称：<b>晴天客服</b>\\n"
+            "Telegram：<code>@qingtian_Boss</code>\\n"
+            "沟通方式：一对一私信\\n\\n"
+            "📌 <b>可协助处理</b>\\n"
+            "• 商品规格、库存及购买前咨询\\n"
+            "• 订单状态、支付与发货问题\\n"
+            "• 商品使用指引及售后问题\\n\\n"
+            "联系时建议附上订单编号和问题描述，以便客服更快定位。请勿向任何人提供账户密码或短信验证码。"
+        )
+        contact_label, back_label = "私信联系人工客服", "返回更多服务"
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(premium_button(contact_label, url="https://t.me/qingtian_Boss"))
+    kb.add(premium_button(back_label, callback_data="more_services"))
+    kb.add(premium_button("中文" if language == "en" else "English", callback_data="lang_zh" if language == "en" else "lang_en"))
+    try:
+        support = bot.get_chat("@qingtian_Boss")
+        photos = bot.get_user_profile_photos(support.id, limit=1)
+        if photos.total_count > 0:
+            file_id = photos.photos[0][-1].file_id
+            bot.send_photo(call.message.chat.id, file_id, caption=text, parse_mode="HTML", reply_markup=kb)
+            try: bot.delete_message(call.message.chat.id, call.message.message_id)
+            except Exception: pass
+            return
+    except Exception:
+        pass
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
 
 @bot.callback_query_handler(func=lambda call: call.data == "cat_account")
 def show_account_menu(call):
