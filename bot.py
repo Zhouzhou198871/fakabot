@@ -368,18 +368,51 @@ def set_user_language(uid, language):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
 
+def enforce_two_column_keyboard(kb):
+    """Normalize every inline keyboard to two buttons per row; pad odd counts with a main-menu action."""
+    if kb is None or not getattr(kb, "keyboard", None):
+        return kb
+    buttons = [button for row in kb.keyboard for button in row]
+    if not buttons:
+        return kb
+    if len(buttons) % 2:
+        buttons.append(types.InlineKeyboardButton(
+            text="返回主菜单",
+            callback_data="ui_buy",
+            icon_custom_emoji_id=EMOJI.get("gear")
+        ))
+    kb.keyboard = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    return kb
+
 _original_send_message = bot.send_message
 def _send_message_with_premium_emoji(*args, **kwargs):
     if len(args) >= 2:
         args = (args[0], premiumize_text(args[1]), *args[2:])
     elif "text" in kwargs:
         kwargs["text"] = premiumize_text(kwargs["text"])
+    if kwargs.get("reply_markup") is not None:
+        kwargs["reply_markup"] = enforce_two_column_keyboard(kwargs["reply_markup"])
     kwargs.setdefault("parse_mode", "HTML")
     return _original_send_message(*args, **kwargs)
 bot.send_message = _send_message_with_premium_emoji
 
+_original_edit_message_text = bot.edit_message_text
+def _edit_message_text_two_columns(*args, **kwargs):
+    if kwargs.get("reply_markup") is not None:
+        kwargs["reply_markup"] = enforce_two_column_keyboard(kwargs["reply_markup"])
+    if len(args) >= 3:
+        args = (*args[:2], premiumize_text(args[2]), *args[3:])
+    elif "text" in kwargs:
+        kwargs["text"] = premiumize_text(kwargs["text"])
+    kwargs.setdefault("parse_mode", "HTML")
+    return _original_edit_message_text(*args, **kwargs)
+bot.edit_message_text = _edit_message_text_two_columns
+
 def safe_edit(bot, chat_id, msg_id, text, kb=None):
-    try: bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=premiumize_text(text), parse_mode="HTML", reply_markup=kb)
+    try:
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
+                              text=premiumize_text(text), parse_mode="HTML",
+                              reply_markup=enforce_two_column_keyboard(kb))
     except Exception as exc:
         print("⚠️ 消息更新失败：", repr(exc), flush=True)
 
