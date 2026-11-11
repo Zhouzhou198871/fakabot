@@ -792,27 +792,31 @@ def render_wallet_page(chat_id, message_id, uid):
     user = get_user(uid)
     language = user.get("language", "zh")
     address = str(user.get("wallet_address") or "")
-    display_address = address if address else ("Not bound" if language == "en" else "尚未绑定")
+    display_address = address if address else ("Not bound" if language == "en" else "暂未绑定")
     balance = float(user.get("balance", 0) or 0)
+    referral_reward = float(user.get("invite_bonus", 0) or 0)
     if language == "en":
         text = (
-            "👛 <b>USDT WALLET MANAGEMENT</b>\n"
-            "<i>Bind and verify your TRC20 receiving address before requesting a withdrawal.</i>\n\n"
-            f"🔗 <b>Saved TRC20 address:</b> <code>{html.escape(display_address)}</code>\n"
-            f"💰 <b>Available balance:</b> <b>{balance:.2f} USDT</b>\n\n"
-            "You can replace the saved address at any time. For your security, every new address must be reviewed and confirmed before it is saved.\n"
-            "Network: <b>TRON · TRC20 · USDT</b>"
+            "WALLET MANAGEMENT\n"
+            "<i>TRON network · USDT · TRC20</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"Available balance: <b>{balance:.2f} USDT</b>\n"
+            f"Referral rewards: <b>{referral_reward:.2f} USDT</b>\n\n"
+            f"Bound receiving address:\n<code>{html.escape(display_address)}</code>\n\n"
+            "You may update this address at any time. A new address is saved only after you review the full address and confirm it."
         )
     else:
         text = (
-            "👛 <b>USDT 钱包管理</b>\n"
-            "<i>提现前请先绑定并核对您的 TRC20 收款地址。</i>\n\n"
-            f"🔗 <b>当前绑定地址：</b><code>{html.escape(masked)}</code>\n"
-            f"💰 <b>账户可用余额：</b><b>{balance:.2f} USDT</b>\n\n"
-            "支持随时更换钱包地址。每次新增或更换地址，都需要您核对完整地址并二次确认后才会保存。\n"
-            "收款网络：<b>TRON · TRC20 · USDT</b>"
+            "钱包地址管理\n"
+            "<i>TRON 网络 · USDT · TRC20</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"账户可用余额：<b>{balance:.2f} USDT</b>\n"
+            f"累计邀请奖励：<b>{referral_reward:.2f} USDT</b>\n\n"
+            f"当前绑定收款地址：\n<code>{html.escape(display_address)}</code>\n\n"
+            "您可以随时更换收款地址。新地址必须先完整展示，经您逐位核对并确认后才会保存。提现前也会再次核对收款地址。"
         )
     safe_edit(bot, chat_id, message_id, text, get_wallet_kb(language))
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "wallet_bind")
 def wallet_bind(call):
@@ -976,14 +980,60 @@ def wallet_withdraw_cancel(call):
 def show_recharge(call):
     user = get_user(call.from_user.id)
     language = user.get("language", "zh")
-    text = ("💳 <b>Balance & Wallet Center</b>\n\nManage your TRC20 wallet address, review it before withdrawal, and contact support for deposit assistance.\n\n<i>Automatic deposits are being integrated.</i>"
-            if language == "en" else
-            "💳 <b>账户资金与钱包中心</b>\n\n在这里管理 TRC20 收款地址，提现前核对完整钱包信息，并查看账户资金相关服务。\n\n<i>USDT 自动充值通道正在接入中，如需充值请联系客服。</i>")
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(premium_button("Wallet address management" if language == "en" else "钱包地址管理", callback_data="wallet_manage"))
-    kb.add(premium_button("Withdraw USDT" if language == "en" else "申请提现", callback_data="wallet_withdraw"))
-    kb.add(premium_button("Back to main menu" if language == "en" else "返回主菜单", callback_data="ui_buy"))
+    uid = str(call.from_user.id)
+    display_name = str(user.get("name") or call.from_user.first_name or ("User" if language == "en" else "用户"))
+    balance = float(user.get("balance", 0) or 0)
+    referral_reward = float(user.get("invite_bonus", 0) or 0)
+    wallet = str(user.get("wallet_address") or "")
+    wallet_display = wallet if wallet else ("Not bound" if language == "en" else "暂未绑定")
+    profile_link = f'<a href="tg://user?id={uid}">{html.escape(display_name)}</a>'
+    if language == "en":
+        text = (
+            "💼 <b>ACCOUNT & FUNDS CENTER</b>\n"
+            "<i>Account overview · Balance · Referral rewards · Wallet</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Account:</b> {profile_link}\n"
+            f"🆔 <b>Telegram ID:</b> <code>{uid}</code>\n\n"
+            f"💵 <b>Available balance:</b> <b>{balance:.2f} USDT</b>\n"
+            f"🎁 <b>Referral rewards earned:</b> <b>{referral_reward:.2f} USDT</b>\n\n"
+            f"🔗 <b>TRC20 wallet:</b>\n<code>{html.escape(wallet_display)}</code>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "<i>Manage your receiving address and review it carefully before every withdrawal. Deposits are not yet automated; contact support for deposit assistance.</i>"
+        )
+    else:
+        text = (
+            "💼 <b>账户与资金中心</b>\n"
+            "<i>账户资料 · 余额管理 · 邀请奖励 · 收款钱包</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>用户昵称：</b>{profile_link}\n"
+            f"🆔 <b>数字 ID：</b><code>{uid}</code>\n\n"
+            f"💵 <b>账户可用余额：</b><b>{balance:.2f} USDT</b>\n"
+            f"🎁 <b>累计邀请奖励：</b><b>{referral_reward:.2f} USDT</b>\n\n"
+            f"🔗 <b>已绑定钱包地址（TRC20）：</b>\n<code>{html.escape(wallet_display)}</code>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "<i>可在下方管理或更换收款地址。每次提现前请仔细核对完整地址。自动充值通道尚未开放，如需充值请联系客服。</i>"
+        )
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if language == "en":
+        kb.row(
+            premium_button("Manage wallet", callback_data="wallet_manage"),
+            premium_button("Withdraw", callback_data="wallet_withdraw")
+        )
+        kb.row(
+            premium_button("Referral rewards", callback_data="ui_invite"),
+            premium_button("Main menu", callback_data="ui_buy")
+        )
+    else:
+        kb.row(
+            premium_button("钱包地址管理", callback_data="wallet_manage"),
+            premium_button("申请提现", callback_data="wallet_withdraw")
+        )
+        kb.row(
+            premium_button("邀请奖励", callback_data="ui_invite"),
+            premium_button("返回主菜单", callback_data="ui_buy")
+        )
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "wallet_manage")
 def wallet_manage(call):
