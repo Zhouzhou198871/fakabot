@@ -265,12 +265,10 @@ def get_invite_friends_kb(page, pages, language="zh"):
     if language == "en":
         kb.row(premium_button("Previous", callback_data=f"invite_friends_{max(0,page-1)}"),
                premium_button("Next", callback_data=f"invite_friends_{min(pages-1,page+1)}"))
-        kb.add(premium_button(f"Page {page+1} / {pages}", callback_data="invite_page_info"))
         kb.add(premium_button("Back to referral overview", callback_data="ui_invite"))
     else:
         kb.row(premium_button("上一页", callback_data=f"invite_friends_{max(0,page-1)}"),
                premium_button("下一页", callback_data=f"invite_friends_{min(pages-1,page+1)}"))
-        kb.add(premium_button(f"第 {page+1} / {pages} 页", callback_data="invite_page_info"))
         kb.add(premium_button("返回邀请奖励", callback_data="ui_invite"))
     return kb
 
@@ -695,13 +693,13 @@ def render_wallet_page(chat_id, message_id, uid):
     user = get_user(uid)
     language = user.get("language", "zh")
     address = str(user.get("wallet_address") or "")
-    masked = (address[:7] + "…" + address[-6:]) if address else ("Not bound" if language == "en" else "尚未绑定")
+    display_address = address if address else ("Not bound" if language == "en" else "尚未绑定")
     balance = float(user.get("balance", 0) or 0)
     if language == "en":
         text = (
             "👛 <b>USDT WALLET MANAGEMENT</b>\n"
             "<i>Bind and verify your TRC20 receiving address before requesting a withdrawal.</i>\n\n"
-            f"🔗 <b>Saved TRC20 address:</b> <code>{html.escape(masked)}</code>\n"
+            f"🔗 <b>Saved TRC20 address:</b> <code>{html.escape(display_address)}</code>\n"
             f"💰 <b>Available balance:</b> <b>{balance:.2f} USDT</b>\n\n"
             "You can replace the saved address at any time. For your security, every new address must be reviewed and confirmed before it is saved.\n"
             "Network: <b>TRON · TRC20 · USDT</b>"
