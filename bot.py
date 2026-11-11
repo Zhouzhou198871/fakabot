@@ -68,13 +68,21 @@ _EMOJI_CLUSTER_RE = re.compile(
     r'(?:\uFE0F|\uFE0E|\u20E3|\U0001F3FB-\U0001F3FF)*'
 )
 def premiumize_text(value):
-    """Convert every decorative Unicode emoji in outgoing bot text into Telegram custom-emoji entities."""
+    """Convert every decorative Unicode emoji into custom entities without nesting existing entities."""
     value = str(value or "")
+    protected = []
+    def hold(match):
+        protected.append(match.group(0))
+        return f"__PREMIUM_ENTITY_{len(protected)-1}__"
+    value = re.sub(r'<tg-emoji\\b[^>]*>.*?</tg-emoji>', hold, value, flags=re.DOTALL)
     def replace(match):
         emoji = match.group(0)
         key = "gift" if any(x in emoji for x in ("🎁", "💰", "💸")) else "diamond"
         return f'<tg-emoji emoji-id="{EMOJI[key]}">{emoji}</tg-emoji>'
-    return _EMOJI_CLUSTER_RE.sub(replace, value)
+    value = _EMOJI_CLUSTER_RE.sub(replace, value)
+    for index, entity in enumerate(protected):
+        value = value.replace(f"__PREMIUM_ENTITY_{index}__", entity)
+    return value
 
 
 # ================= 完整真实数据区 =================
