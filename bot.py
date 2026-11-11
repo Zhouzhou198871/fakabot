@@ -62,6 +62,21 @@ def premium_button(text, **kwargs):
         **kwargs
     )
 
+
+_EMOJI_CLUSTER_RE = re.compile(
+    r'[\U0001F000-\U0001FAFF\u2600-\u27BF](?:\uFE0F|\uFE0E)?(?:\u200D[\U0001F000-\U0001FAFF\u2600-\u27BF](?:\uFE0F|\uFE0E)?)*'
+    r'(?:\uFE0F|\uFE0E|\u20E3|\U0001F3FB-\U0001F3FF)*'
+)
+def premiumize_text(value):
+    """Convert every decorative Unicode emoji in outgoing bot text into Telegram custom-emoji entities."""
+    value = str(value or "")
+    def replace(match):
+        emoji = match.group(0)
+        key = "gift" if any(x in emoji for x in ("🎁", "💰", "💸")) else "diamond"
+        return f'<tg-emoji emoji-id="{EMOJI[key]}">{emoji}</tg-emoji>'
+    return _EMOJI_CLUSTER_RE.sub(replace, value)
+
+
 # ================= 完整真实数据区 =================
 APPLE_PRODUCTS = [
     {"id": "a1", "name": "🤝美区 共享账号 | 已购小伙剪APP", "price": "2.78"},
@@ -238,20 +253,42 @@ def format_local_time(value):
 def get_referral_page(uid, page=0):
     users = load_json_file(USERS_FILE, {})
     orders = load_json_file(ORDERS_FILE, [])
-    spend_map = referral_spend_map()
-    invitees = []
+    rows = []
     for invitee_id, info in users.items():
-        if str(info.get("referred_by") or "") == str(uid):
-            invitees.append((invitee_id, info))
-    invitees.sort(key=lambda pair: float(pair[1].get("referred_at") or pair[1].get("join_time") or 0), reverse=True)
-    total = len(invitees)
+        if str(info.get("referred_by") or "") != str(uid):
+            continue
+        invitee_name = str(info.get("name") or info.get("first_name") or "Telegram User")
+        paid_orders = [
+            order for order in orders
+            if isinstance(order, dict) and _order_is_paid(order) and _order_user_id(order) == str(invitee_id)
+        ] if isinstance(orders, list) else []
+        if not paid_orders:
+            rows.append({
+                "nickname": invitee_name, "user_id": str(invitee_id),
+                "date": info.get("referred_at") or info.get("join_time"),
+                "product": "—", "order_id": "—", "amount": 0.0, "commission": 0.0,
+                "rate": REFERRAL_RATE, "no_order": True
+            })
+        for order in paid_orders:
+            amount = _order_amount(order)
+            rows.append({
+                "nickname": invitee_name, "user_id": str(invitee_id),
+                "date": order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at") or order.get("created_at"),
+                "product": str(order.get("product_name") or order.get("product_title") or order.get("item_name") or order.get("product") or "商品信息未记录"),
+                "order_id": str(order.get("order_id") or order.get("id") or "—"),
+                "amount": amount, "commission": round(amount * REFERRAL_RATE, 6),
+                "rate": REFERRAL_RATE, "no_order": False
+            })
+    rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+    total = len(rows)
     pages = max(1, (total + REFERRAL_PAGE_SIZE - 1) // REFERRAL_PAGE_SIZE)
     page = max(0, min(int(page), pages - 1))
-    selected = invitees[page * REFERRAL_PAGE_SIZE:(page + 1) * REFERRAL_PAGE_SIZE]
-    return selected, total, pages, page, spend_map
+    selected = rows[page * REFERRAL_PAGE_SIZE:(page + 1) * REFERRAL_PAGE_SIZE]
+    return selected, total, pages, page
+
 
 def get_invite_kb(language="zh"):
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb = types.InlineKeyboardMarkup(row_width=2)
     if language == "en":
         kb.add(premium_button("Invited friends & activity", callback_data="invite_friends_0"))
         kb.add(premium_button("Back to main menu", callback_data="ui_buy"))
@@ -273,7 +310,7 @@ def get_invite_friends_kb(page, pages, language="zh"):
     return kb
 
 def get_wallet_kb(language="zh"):
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb = types.InlineKeyboardMarkup(row_width=2)
     if language == "en":
         kb.add(premium_button("Bind / change TRC20 wallet", callback_data="wallet_bind"))
         kb.add(premium_button("Withdraw USDT", callback_data="wallet_withdraw"))
@@ -297,6 +334,10 @@ def get_user(uid, name=""):
         users[uid_str] = {"name": name, "join_time": time.time(), "balance": 0.0, "orders_count": 0, "invited_count": 0, "invite_bonus": 0.0, "language": "zh"}
         with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump(users, f, ensure_ascii=False, indent=2)
     users[uid_str].setdefault("language", "zh")
+    if name:
+        users[uid_str]["name"] = str(name)
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(users, f, ensure_ascii=False, indent=2)
     return users[uid_str]
 
 def set_user_language(uid, language):
@@ -306,9 +347,20 @@ def set_user_language(uid, language):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
 
+_original_send_message = bot.send_message
+def _send_message_with_premium_emoji(*args, **kwargs):
+    if len(args) >= 2:
+        args = (args[0], premiumize_text(args[1]), *args[2:])
+    elif "text" in kwargs:
+        kwargs["text"] = premiumize_text(kwargs["text"])
+    kwargs.setdefault("parse_mode", "HTML")
+    return _original_send_message(*args, **kwargs)
+bot.send_message = _send_message_with_premium_emoji
+
 def safe_edit(bot, chat_id, msg_id, text, kb=None):
-    try: bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text, parse_mode="HTML", reply_markup=kb)
-    except: pass
+    try: bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=premiumize_text(text), parse_mode="HTML", reply_markup=kb)
+    except Exception as exc:
+        print("⚠️ 消息更新失败：", repr(exc), flush=True)
 
 def get_main_kb():
     """主界面：账号与节点合并为账号商城，严格两列三行。"""
@@ -643,33 +695,65 @@ def render_invite_page(chat_id, message_id, uid):
     safe_edit(bot, chat_id, message_id, text, get_invite_kb(language))
 
 def render_invite_friends(chat_id, message_id, uid, page=0):
-    sync_referral_rewards()
+    selected, total, pages, page = get_referral_page(uid, page)
     user = get_user(uid)
     language = user.get("language", "zh")
-    selected, total, pages, page, spend_map = get_referral_page(uid, page)
-    lines = []
     if language == "en":
-        lines.extend(["👥 <b>INVITED FRIENDS</b>", "<i>Referral activity and verified purchase totals</i>", "",
-                      f"Total invited: <b>{total}</b>", f"Page: <b>{page+1} / {pages}</b>", "━━━━━━━━━━━━━━━━━━"])
+        lines = [
+            "👥 <b>REFERRAL ORDER STATEMENTS</b>",
+            "<i>Paid orders from permanently linked invited friends</i>",
+            "",
+            f"Records: <b>{total}</b>  ·  Page <b>{page+1}/{pages}</b>",
+            "━━━━━━━━━━━━━━━━━━"
+        ]
     else:
-        lines.extend(["👥 <b>邀请好友 · 消费明细</b>", "<i>查看好友加入时间及累计成功消费</i>", "",
-                      f"累计邀请：<b>{total}</b> 位", f"当前页码：<b>{page+1} / {pages}</b>", "━━━━━━━━━━━━━━━━━━"])
+        lines = [
+            "👥 <b>邀请好友 · 订单返佣明细</b>",
+            "<i>逐笔查看好友资料、成功订单及对应邀请收益</i>",
+            "",
+            f"记录总数：<b>{total}</b> 条　·　第 <b>{page+1}/{pages}</b> 页",
+            "━━━━━━━━━━━━━━━━━━"
+        ]
     if selected:
-        for index, (invitee_id, info) in enumerate(selected, start=page * REFERRAL_PAGE_SIZE + 1):
-            joined = format_local_time(info.get("referred_at") or info.get("join_time"))
-            spent = spend_map.get(str(invitee_id), 0.0)
+        for index, row in enumerate(selected, start=page * REFERRAL_PAGE_SIZE + 1):
+            nick = html.escape(row["nickname"][:40])
+            uid_text = html.escape(row["user_id"])
+            date_text = html.escape(format_local_time(row.get("date")))
+            product = html.escape(row["product"][:80])
+            order_id = html.escape(row["order_id"])
+            if row["no_order"]:
+                if language == "en":
+                    lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                    lines.append(f"Joined: {date_text}")
+                    lines.append("<i>No successfully paid orders yet.</i>")
+                else:
+                    lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                    lines.append(f"加入时间：{date_text}")
+                    lines.append("<i>暂未产生已确认支付的订单。</i>")
+                continue
+            amount = float(row["amount"])
+            commission = float(row["commission"])
             if language == "en":
-                lines.append(f"\n<b>{index:02d}</b>  ·  User ID <code>{invitee_id}</code>")
-                lines.append(f"     Joined: {html.escape(joined)}  |  Spend: <b>{spent:.2f} USDT</b>")
+                lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                lines.append(f"Date: <b>{date_text}</b>")
+                lines.append(f"Product: {product}")
+                lines.append(f"Order: <code>{order_id}</code>")
+                lines.append(f"Spend: <b>{amount:.2f} USDT</b>  ·  Rate: <b>{row['rate']*100:.0f}%</b>")
+                lines.append(f"Reward: <b>+{commission:.2f} USDT</b>")
             else:
-                lines.append(f"\n<b>{index:02d}</b>  ·  好友 ID：<code>{invitee_id}</code>")
-                lines.append(f"     加入时间：{html.escape(joined)}")
-                lines.append(f"     累计消费：<b>{spent:.2f} USDT</b>")
+                lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                lines.append(f"消费日期：<b>{date_text}</b>")
+                lines.append(f"商品名称：{product}")
+                lines.append(f"订单编号：<code>{order_id}</code>")
+                lines.append(f"消费金额：<b>{amount:.2f} USDT</b>　返佣比例：<b>{row['rate']*100:.0f}%</b>")
+                lines.append(f"本笔返佣：<b>+{commission:.2f} USDT</b>")
+            lines.append("────────────────")
     else:
-        lines.append("\n<i>No invited friends yet.</i>" if language == "en" else "\n<i>暂时还没有好友通过您的专属链接加入。</i>")
-    lines.append("\n<i>Totals are calculated from orders marked as successfully paid.</i>" if language == "en"
-                 else "\n<i>消费金额仅统计系统已确认成功的订单。</i>")
+        lines.append("\n<i>No referral records yet.</i>" if language == "en" else "\n<i>暂无邀请好友或订单记录，好友成功消费后会在这里逐笔展示。</i>")
+    lines.append("\n<i>Only successfully paid orders are included. Commission is calculated at 5%.</i>" if language == "en"
+                 else "\n<i>仅统计系统确认成功的订单；返佣按订单实付金额的 5% 计算。</i>")
     safe_edit(bot, chat_id, message_id, "\n".join(lines), get_invite_friends_kb(page, pages, language))
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_invite")
 def show_invite(call):
