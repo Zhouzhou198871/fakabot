@@ -265,7 +265,9 @@ def get_referral_page(uid, page=0):
     for invitee_id, info in users.items():
         if str(info.get("referred_by") or "") != str(uid):
             continue
-        invitee_name = str(info.get("name") or info.get("first_name") or "Telegram User")
+        invitee_name = str(info.get("name") or info.get("first_name") or info.get("username") or "Telegram User")
+        if info.get("username"):
+            invitee_name += f" (@{str(info['username']).lstrip('@')})"
         paid_orders = [
             order for order in orders
             if isinstance(order, dict) and _order_is_paid(order) and _order_user_id(order) == str(invitee_id)
@@ -472,7 +474,12 @@ def generate_main_text(user, uid):
 
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
-    user = get_user(message.from_user.id, message.from_user.first_name or "老板")
+    display_name = " ".join(part for part in [message.from_user.first_name, message.from_user.last_name] if part).strip() or "老板"
+    user = get_user(message.from_user.id, display_name)
+    if message.from_user.username:
+        users = load_json_file(USERS_FILE, {})
+        users.setdefault(str(message.from_user.id), {})["username"] = message.from_user.username
+        save_json_file(USERS_FILE, users)
     payload = (message.text or "").split(maxsplit=1)
     if len(payload) > 1:
         bind_referrer(message.from_user.id, payload[1])
@@ -658,11 +665,11 @@ def buy_item(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def pay_item(call):
-    bot.answer_callback_query(call.id, "⏳ 支付接口准备中", show_alert=True)
+    bot.answer_callback_query(call.id, "支付接口准备中", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_orders")
 def show_orders(call):
-    bot.answer_callback_query(call.id, "🧾 您暂时还没有历史订单哦~", show_alert=True)
+    bot.answer_callback_query(call.id, "您暂时还没有历史订单", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_help")
 def show_help(call):
