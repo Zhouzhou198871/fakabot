@@ -99,6 +99,8 @@ jobs:
                   for row in final_markup.keyboard for button in row
               )
               print("Premium text and button icon rejection fallbacks passed.")
+          finally:
+              bot._original_send_message = original
           PY
 
       - name: Verify source bundle archive excludes business data and secrets
@@ -147,7 +149,4 @@ jobs:
           finally:
               bot.bot.send_document = original_send
               bot.ARCHIVE_STORE = original_store
-          PY
-          finally:
-              bot._original_send_message = original
           PY
