@@ -393,7 +393,9 @@ def enforce_two_column_keyboard(kb):
                 text="返回主菜单", callback_data="ui_buy"
             )
         buttons.append(back_button)
-    kb.keyboard = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    # pyTelegramBotAPI exposes keyboard as a read-only property; mutate its list in place.
+    kb.keyboard[:] = rows
     return kb
 
 def _is_button_icon_error(exc):
