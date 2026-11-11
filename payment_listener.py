@@ -5,18 +5,16 @@ This module ONLY reads public chain data. A private key is neither required nor
 accepted. It polls confirmed TRC20 transfers for the configured receiving
 address and matches exact integer token units to pending orders.
 
-Run it in the same process as bot.py (PaymentWatcher.start()). The shared
-FileLock protects JSON updates between threads/processes using this code.
+Orders are read and written only through callbacks connected to the private
+Telegram archive; this module never creates local business-data files.
 """
 
 import logging
-import os
 import threading
 import time
 from datetime import datetime, timezone
 
 import requests
-from filelock import FileLock
 
 logger = logging.getLogger("fakabot.payment")
 
@@ -113,8 +111,8 @@ class PaymentWatcher:
 
     def __init__(
         self,
-        orders_file,
-        lock_file,
+        load_orders,
+        save_orders,
         on_payment,
         on_late_payment=None,
         on_expired=None,
@@ -126,8 +124,11 @@ class PaymentWatcher:
             raise RuntimeError("缺少 TRON_RECEIVE_ADDRESS 环境变量")
         if USDT_DECIMALS != 6:
             raise RuntimeError("TRON USDT 主网通常为 6 位精度，请核实 USDT_DECIMALS")
-        self.orders_file = orders_file
-        self.lock = FileLock(lock_file, timeout=20)
+        if not callable(load_orders) or not callable(save_orders):
+            raise TypeError("PaymentWatcher 必须使用 Telegram 归档存储的读写回调")
+        self.load_orders = load_orders
+        self.save_orders = save_orders
+        self.lock = threading.RLock()
         self.client = TronGridClient(TRONGRID_API_KEY)
         self.on_payment = on_payment
         self.on_late_payment = on_late_payment
@@ -160,31 +161,15 @@ class PaymentWatcher:
             self.stop_event.wait(self.poll_interval)
 
     def _read_orders(self):
-        import json
-        with open(self.orders_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = self.load_orders()
         if not isinstance(data, list):
-            raise ValueError("orders.json 根节点必须是数组")
+            raise ValueError("Telegram 归档中的 orders 必须是数组")
         return data
 
     def _write_orders(self, orders):
-        import json
-        directory = os.path.dirname(self.orders_file) or "."
-        import tempfile
-        fd, temp_path = tempfile.mkstemp(prefix=".orders_", dir=directory)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(orders, f, ensure_ascii=False, indent=2)
-                f.write("\n")
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temp_path, self.orders_file)
-        except Exception:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            raise
+        if not isinstance(orders, list):
+            raise ValueError("orders 必须是数组")
+        self.save_orders(orders)
 
     def _pending_snapshot(self):
         with self.lock:
