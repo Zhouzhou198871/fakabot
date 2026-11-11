@@ -99,6 +99,55 @@ jobs:
                   for row in final_markup.keyboard for button in row
               )
               print("Premium text and button icon rejection fallbacks passed.")
+          PY
+
+      - name: Verify source bundle archive excludes business data and secrets
+        env:
+          BOT_TOKEN: "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+        run: |
+          python - <<'PY'
+          import io
+          import zipfile
+          from types import SimpleNamespace
+          import bot
+
+          class MemoryStore:
+              def __init__(self):
+                  self.meta = {}
+              def load(self, key, default):
+                  return dict(self.meta) if key == "meta" else default
+              def save(self, key, value):
+                  if key == "meta":
+                      self.meta = dict(value)
+
+          sent = []
+          original_send = bot.bot.send_document
+          original_store = bot.ARCHIVE_STORE
+
+          def fake_send_document(chat_id, document, **kwargs):
+              payload = document.read()
+              with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                  names = set(archive.namelist())
+                  assert "bot.py" in names
+                  assert "telegram_storage.py" in names
+                  assert "users.json" not in names
+                  assert "orders.json" not in names
+                  assert not any(name.startswith(".env") for name in names)
+              sent.append((chat_id, kwargs))
+              return SimpleNamespace(message_id=7654321)
+
+          bot.ARCHIVE_STORE = MemoryStore()
+          bot.bot.send_document = fake_send_document
+          try:
+              assert bot.archive_source_bundle() is True
+              assert len(sent) == 1
+              assert bot.ARCHIVE_STORE.meta["source_bundle_message_id"] == 7654321
+              assert bot.archive_source_bundle() is False
+              print("Source bundle upload, exclusions, and deduplication passed.")
+          finally:
+              bot.bot.send_document = original_send
+              bot.ARCHIVE_STORE = original_store
+          PY
           finally:
               bot._original_send_message = original
           PY
