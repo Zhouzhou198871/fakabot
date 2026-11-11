@@ -2,7 +2,10 @@
 import telebot, time, json, os
 from telebot import types
 
-TOKEN = "8938905914:AAF7og--rRBPasko6ZXAXVx16yw51smucv8"
+TOKEN = os.getenv("BOT_TOKEN", "").strip()
+ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
+if not TOKEN:
+    raise RuntimeError("缺少环境变量 BOT_TOKEN，请在服务器环境中配置机器人 Token。")
 bot = telebot.TeleBot(TOKEN, threaded=False)
 USERS_FILE = "/root/fakabot/users.json"
 
@@ -78,22 +81,21 @@ def safe_edit(bot, chat_id, msg_id, text, kb=None):
     except: pass
 
 def get_main_kb():
+    """主界面：账号与节点合并为账号商城，严格两列三行。"""
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("账号铺", callback_data="cat_account", icon_custom_emoji_id=EMOJI["gift"]),
-        types.InlineKeyboardButton("节点铺", callback_data="cat_node", icon_custom_emoji_id=EMOJI["node"])
+    kb.row(
+        types.InlineKeyboardButton("账号商城", callback_data="cat_account", icon_custom_emoji_id=EMOJI["diamond"]),
+        types.InlineKeyboardButton("历史订单", callback_data="ui_orders", icon_custom_emoji_id=EMOJI["gear"])
     )
-    kb.add(
-        types.InlineKeyboardButton("历史订单", callback_data="ui_orders", icon_custom_emoji_id=EMOJI["gear"]),
-        types.InlineKeyboardButton("使用帮助", callback_data="ui_help", icon_custom_emoji_id=EMOJI["star"])
-    )
-    kb.add(
+    kb.row(
         types.InlineKeyboardButton("邀请奖励", callback_data="ui_invite", icon_custom_emoji_id=EMOJI["gift"]),
         types.InlineKeyboardButton("充值", callback_data="ui_recharge", icon_custom_emoji_id=EMOJI["usdt"])
     )
-    kb.add(types.InlineKeyboardButton("更多服务", callback_data="more_services", icon_custom_emoji_id=EMOJI["gear"]))
+    kb.row(
+        types.InlineKeyboardButton("使用帮助", callback_data="ui_help", icon_custom_emoji_id=EMOJI["star"]),
+        types.InlineKeyboardButton("更多服务", callback_data="more_services", icon_custom_emoji_id=EMOJI["node"])
+    )
     return kb
-
 def get_more_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
@@ -140,16 +142,17 @@ def get_back_kb():
     return kb
 
 def generate_main_text(user, uid):
+    """主界面正文统一使用 Telegram Custom Emoji 实体，不混用普通 Emoji。"""
     return (
-        f"<tg-emoji emoji-id=\"{EMOJI['star']}\">✨</tg-emoji> <b>欢迎光临晴天号铺。</b>\n\n"
-        f"<tg-emoji emoji-id=\"{EMOJI['gear']}\">📌</tg-emoji> <b>您的专属账户信息</b>\n"
-        f" ├ 🆔 <b>用户 ID：</b> <code>{uid}</code>\n"
-        f" ├ <tg-emoji emoji-id=\"{EMOJI['usdt']}\">💰</tg-emoji> <b>账户余额：</b> <b>{user['balance']:.2f}</b> USDT\n"
-        f" ├ 🛒 <b>订单记录：</b> {user.get('orders_count', 0)} 单\n"
-        f" ├ 👥 <b>邀请用户：</b> {user.get('invited_count', 0)} 位\n"
-        f" └ 🎁 <b>邀请奖励：</b> 累计 {user.get('invite_bonus', 0.0):.2f} USDT\n\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"<tg-emoji emoji-id=\"{EMOJI['gift']}\">🛒</tg-emoji> <b>自助选购</b>：点击下方按钮即可挑选。"
+        f'<tg-emoji emoji-id="{EMOJI["star"]}">✨</tg-emoji> <b>欢迎光临晴天号铺。</b>\\n\\n'
+        f'<tg-emoji emoji-id="{EMOJI["diamond"]}">📌</tg-emoji> <b>您的专属账户信息</b>\\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["gear"]}">🆔</tg-emoji> <b>用户 ID：</b> <code>{uid}</code>\\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["usdt"]}">💰</tg-emoji> <b>账户余额：</b> <b>{user["balance"]:.2f}</b> USDT\\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["apple"]}">🛒</tg-emoji> <b>订单记录：</b> {user.get("orders_count", 0)} 单\\n'
+        f' ├ <tg-emoji emoji-id="{EMOJI["tg"]}">👥</tg-emoji> <b>邀请用户：</b> {user.get("invited_count", 0)} 位\\n'
+        f' └ <tg-emoji emoji-id="{EMOJI["gift"]}">🎁</tg-emoji> <b>邀请奖励：</b> 累计 {user.get("invite_bonus", 0.0):.2f} USDT\\n\\n'
+        f'━━━━━━━━━━━━━━━━\\n'
+        f'<tg-emoji emoji-id="{EMOJI["star"]}">🛒</tg-emoji> <b>自助选购</b>：点击下方按钮即可挑选。'
     )
 
 @bot.message_handler(commands=['start'])
