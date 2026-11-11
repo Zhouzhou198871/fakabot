@@ -1,5 +1,9 @@
 users.json
+orders.json
+withdrawals.json
 *.log
 __pycache__/
 venv/
-orders.json\nwithdrawals.json\n
+.env
+.env.*
+!.env.example
