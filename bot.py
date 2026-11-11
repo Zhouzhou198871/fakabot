@@ -690,8 +690,11 @@ def buy_item(call):
     prod_id = call.data.replace("buy_", "")
     all_products = APPLE_PRODUCTS + TG_PRODUCTS + AI_PRODUCTS + NODE_PRODUCTS
     p = next((x for x in all_products if x["id"] == prod_id), None)
-    if not p: return
-    
+    if not p:
+        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+
     if prod_id.startswith("a"):
         detail = (
             f"🛍 <b>商品详情：{p['name']}</b>\n"
@@ -721,7 +724,45 @@ def pay_item(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_orders")
 def show_orders(call):
-    bot.answer_callback_query(call.id, "您暂时还没有历史订单", show_alert=True)
+    bot.answer_callback_query(call.id)
+    all_orders = load_json_file(ORDERS_FILE, [])
+    uid = str(call.from_user.id)
+    mine = [
+        item for item in all_orders
+        if isinstance(item, dict) and _order_user_id(item) == uid
+    ] if isinstance(all_orders, list) else []
+    mine.sort(key=lambda item: str(item.get("created_at") or item.get("paid_at") or ""), reverse=True)
+    if not mine:
+        text = (
+            "📦 <b>我的历史订单</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "目前还没有订单记录。您可以返回商城选择商品，订单创建后会自动归档到这里。"
+        )
+    else:
+        lines = [
+            "📦 <b>我的历史订单</b>",
+            f"共 <b>{len(mine)}</b> 笔记录 · 最近显示 10 笔",
+            "━━━━━━━━━━━━━━━━━━",
+        ]
+        status_labels = {
+            "paid": "已支付", "success": "已支付", "completed": "已完成",
+            "pending": "待支付", "pending_payment": "待支付",
+            "expired": "已过期", "failed": "失败", "delivered": "已交付",
+        }
+        for item in mine[:10]:
+            order_id = html.escape(str(item.get("order_id") or item.get("id") or "—"))
+            product = html.escape(str(item.get("product_name") or item.get("product_title") or item.get("item_name") or item.get("product") or "商品"))
+            amount = _order_amount(item)
+            raw_status = str(item.get("payment_status") or item.get("status") or "unknown").lower()
+            status = status_labels.get(raw_status, html.escape(raw_status))
+            created = html.escape(format_local_time(item.get("created_at") or item.get("paid_at") or item.get("paid_time")))
+            lines.append(
+                f"\n<b>{product}</b>\n订单：<code>{order_id}</code>\n"
+                f"金额：<b>{amount:.2f} USDT</b> · 状态：<b>{status}</b>\n"
+                f"时间：{created}"
+            )
+        text = "\n".join(lines)
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_help")
 def show_help(call):
