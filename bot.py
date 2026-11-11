@@ -1394,8 +1394,10 @@ def daily_report_loop():
             meta = ARCHIVE_STORE.load("meta", {})
             if meta.get("last_daily_report") == report_date:
                 continue
-            bot.send_message(ARCHIVE_CHAT_ID, daily_report_text(report_date),
-                             parse_mode="HTML", disable_web_page_preview=True)
+            report_text = daily_report_text(report_date)
+            ARCHIVE_STORE.send_report_snapshot(
+                report_text, report_title="每日运营汇报 " + report_date
+            )
             meta["last_daily_report"] = report_date
             ARCHIVE_STORE.save("meta", meta)
             print("✅ 每日运营汇报已发送：" + report_date, flush=True)
