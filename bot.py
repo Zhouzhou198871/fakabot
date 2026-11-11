@@ -1098,7 +1098,6 @@ if __name__ == "__main__":
     try:
         import threading
         from telegram_storage import TelegramArchiveStore
-        global ARCHIVE_STORE
         legacy_paths = {
             "users": USERS_FILE,
             "orders": ORDERS_FILE,
