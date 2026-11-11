@@ -396,6 +396,72 @@ def enforce_two_column_keyboard(kb):
     kb.keyboard = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     return kb
 
+def _is_button_icon_error(exc):
+    message = str(exc).lower()
+    return any(token in message for token in (
+        "icon_custom_emoji_id", "button_icon_invalid",
+        "button_icon_emoji_not_allowed", "button icon"
+    ))
+
+
+def _is_premium_entity_error(exc):
+    message = str(exc).lower()
+    return any(token in message for token in (
+        "can't parse entities", "cannot parse entities",
+        "unsupported start tag", "unsupported entity",
+        "custom emoji entity", "emoji entity"
+    ))
+
+
+def _strip_premium_entities(value):
+    return re.sub(
+        r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
+        r"\\1",
+        str(value or ""),
+        flags=re.DOTALL,
+    )
+
+
+def _call_with_premium_fallback(api_call, args, kwargs, text_index):
+    """Retry only optional Premium decorations; never let them break core bot replies."""
+    current_args = list(args)
+    current_kwargs = dict(kwargs)
+    for _ in range(3):
+        try:
+            return api_call(*current_args, **current_kwargs)
+        except Exception as exc:
+            changed = False
+            text_value = None
+            if len(current_args) > text_index:
+                text_value = current_args[text_index]
+            elif "text" in current_kwargs:
+                text_value = current_kwargs["text"]
+
+            if (
+                _is_premium_entity_error(exc)
+                and isinstance(text_value, str)
+                and "<tg-emoji" in text_value
+            ):
+                plain_text = _strip_premium_entities(text_value)
+                if len(current_args) > text_index:
+                    current_args[text_index] = plain_text
+                else:
+                    current_kwargs["text"] = plain_text
+                changed = True
+
+            markup = current_kwargs.get("reply_markup")
+            if _is_button_icon_error(exc) and markup is not None:
+                for row in getattr(markup, "keyboard", []):
+                    for button in row:
+                        if hasattr(button, "icon_custom_emoji_id") and button.icon_custom_emoji_id:
+                            button.icon_custom_emoji_id = None
+                            changed = True
+
+            if not changed:
+                raise
+    raise RuntimeError("Telegram API repeatedly rejected optional Premium decorations")
+
+
 _original_send_message = bot.send_message
 def _send_message_with_premium_emoji(*args, **kwargs):
     if len(args) >= 2:
@@ -405,22 +471,7 @@ def _send_message_with_premium_emoji(*args, **kwargs):
     if kwargs.get("reply_markup") is not None:
         kwargs["reply_markup"] = enforce_two_column_keyboard(kwargs["reply_markup"])
     kwargs.setdefault("parse_mode", "HTML")
-    try:
-        return _original_send_message(*args, **kwargs)
-    except Exception as exc:
-        markup = kwargs.get("reply_markup")
-        error_text = str(exc).lower()
-        icon_error = any(token in error_text for token in (
-            "icon_custom_emoji_id", "button_icon_invalid",
-            "button_icon_emoji_not_allowed", "custom emoji", "button icon"
-        ))
-        if markup is None or not icon_error:
-            raise
-        for row in getattr(markup, "keyboard", []):
-            for button in row:
-                if hasattr(button, "icon_custom_emoji_id"):
-                    button.icon_custom_emoji_id = None
-        return _original_send_message(*args, **kwargs)
+    return _call_with_premium_fallback(_original_send_message, args, kwargs, 1)
 bot.send_message = _send_message_with_premium_emoji
 
 _original_edit_message_text = bot.edit_message_text
@@ -432,22 +483,7 @@ def _edit_message_text_two_columns(*args, **kwargs):
     elif "text" in kwargs:
         kwargs["text"] = premiumize_text(kwargs["text"])
     kwargs.setdefault("parse_mode", "HTML")
-    try:
-        return _original_edit_message_text(*args, **kwargs)
-    except Exception as exc:
-        markup = kwargs.get("reply_markup")
-        error_text = str(exc).lower()
-        icon_error = any(token in error_text for token in (
-            "icon_custom_emoji_id", "button_icon_invalid",
-            "button_icon_emoji_not_allowed", "custom emoji", "button icon"
-        ))
-        if markup is None or not icon_error:
-            raise
-        for row in getattr(markup, "keyboard", []):
-            for button in row:
-                if hasattr(button, "icon_custom_emoji_id"):
-                    button.icon_custom_emoji_id = None
-        return _original_edit_message_text(*args, **kwargs)
+    return _call_with_premium_fallback(_original_edit_message_text, args, kwargs, 2)
 bot.edit_message_text = _edit_message_text_two_columns
 
 def safe_edit(bot, chat_id, msg_id, text, kb=None):
