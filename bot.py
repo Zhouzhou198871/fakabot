@@ -615,17 +615,21 @@ def cmd_ping(message):
 
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
-    display_name = " ".join(part for part in [message.from_user.first_name, message.from_user.last_name] if part).strip() or "老板"
-    user = get_user(message.from_user.id, display_name)
-    if message.from_user.username:
-        users = load_json_file(USERS_FILE, {})
-        users.setdefault(str(message.from_user.id), {})["username"] = message.from_user.username
-        save_json_file(USERS_FILE, users)
-    payload = (message.text or "").split(maxsplit=1)
-    if len(payload) > 1:
-        bind_referrer(message.from_user.id, payload[1])
-    text = generate_main_text(user, message.from_user.id)
-    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=get_main_kb())
+    try:
+        display_name = " ".join(part for part in [message.from_user.first_name, message.from_user.last_name] if part).strip() or "老板"
+        user = get_user(message.from_user.id, display_name)
+        if message.from_user.username:
+            users = load_json_file(USERS_FILE, {})
+            users.setdefault(str(message.from_user.id), {})["username"] = message.from_user.username
+            save_json_file(USERS_FILE, users)
+        payload = (message.text or "").split(maxsplit=1)
+        if len(payload) > 1:
+            bind_referrer(message.from_user.id, payload[1])
+        response_text = generate_main_text(user, message.from_user.id)
+        bot.send_message(message.chat.id, response_text, parse_mode="HTML", reply_markup=get_main_kb())
+    except Exception as exc:
+        print("❌ /start 处理失败：", repr(exc), flush=True)
+        bot.send_message(message.chat.id, "☀️ 晴天号铺正在恢复数据服务，请稍后重试。基础在线检测：/ping")
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_buy")
 def show_main_menu(call):
