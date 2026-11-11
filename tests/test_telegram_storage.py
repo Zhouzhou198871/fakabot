@@ -11,6 +11,7 @@ class FakeBot:
     def __init__(self):
         self.pinned_message = None
         self.documents = {}
+        self.messages = {}
         self.next_id = 1
         self.fail_send = False
 
@@ -24,28 +25,22 @@ class FakeBot:
         message_id = self.next_id
         self.next_id += 1
         self.documents[file_id] = document.read()
-        return SimpleNamespace(
-            message_id=message_id,
-            document=SimpleNamespace(file_id=file_id),
-        )
+        message = SimpleNamespace(message_id=message_id, document=SimpleNamespace(file_id=file_id))
+        self.messages[message_id] = message
+        return message
 
     def pin_chat_message(self, chat_id, message_id, disable_notification=True):
-        message = next(
-            item for item in self._messages
-            if item.message_id == message_id
-        )
-        self.pinned_message = message
+        self.pinned_message = self.messages[message_id]
 
-    @property
-    def _messages(self):
-        # Each successful upload is represented by its stored document.
-        return [
-            SimpleNamespace(
-                message_id=int(file_id.split("-")[1]),
-                document=SimpleNamespace(file_id=file_id),
-            )
-            for file_id in self.documents
-        ]
+    def edit_message_media(self, media, chat_id, message_id):
+        file_id = "file-edit-" + str(self.next_id)
+        self.next_id += 1
+        self.documents[file_id] = media.media.read()
+        message = SimpleNamespace(message_id=message_id, document=SimpleNamespace(file_id=file_id))
+        self.messages[message_id] = message
+        if self.pinned_message and self.pinned_message.message_id == message_id:
+            self.pinned_message = message
+        return message
 
     def get_file(self, file_id):
         return SimpleNamespace(file_path=file_id)
@@ -104,6 +99,21 @@ class TelegramArchiveStoreTests(unittest.TestCase):
             recovered.load("meta", {}),
             {"last_daily_report": "2026-11-12"},
         )
+
+
+    def test_updates_single_pinned_archive_instead_of_posting_new_messages(self):
+        bot = FakeBot()
+        store = TelegramArchiveStore(bot, -1004459109788)
+        store.initialize()
+        first_message_id = store.archive_message_id
+        self.assertEqual(len(bot.messages), 1)
+
+        store.save("users", {"123": {"balance": 10}})
+        store.save("meta", {"last_daily_report": "2026-11-12"})
+
+        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(store.archive_message_id, first_message_id)
+        self.assertEqual(bot.pinned_message.message_id, first_message_id)
 
 if __name__ == "__main__":
     unittest.main()
