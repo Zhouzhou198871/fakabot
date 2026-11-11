@@ -74,7 +74,7 @@ def premiumize_text(value):
     def hold(match):
         protected.append(match.group(0))
         return f"__PREMIUM_ENTITY_{len(protected)-1}__"
-    value = re.sub(r'<tg-emoji\\b[^>]*>.*?</tg-emoji>', hold, value, flags=re.DOTALL)
+    value = re.sub(r'<tg-emoji\b[^>]*>.*?</tg-emoji>', hold, value, flags=re.DOTALL)
     def replace(match):
         emoji = match.group(0)
         key = "gift" if any(x in emoji for x in ("🎁", "💰", "💸")) else "diamond"
