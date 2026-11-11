@@ -139,9 +139,8 @@ def save_json_file(path, value):
 
 def bind_referrer(uid, start_payload):
     """Bind an inviter once only. Existing bindings are never overwritten."""
-    if not str(start_payload or "").startswith("ref_"):
-        return False
-    inviter_id = str(start_payload)[4:].strip()
+    payload = str(start_payload or "").strip()
+    inviter_id = payload[4:].strip() if payload.startswith("ref_") else payload
     uid, inviter_id = str(uid), str(inviter_id)
     if not inviter_id.isdigit() or inviter_id == uid:
         return False
@@ -733,9 +732,20 @@ def show_recharge(call):
     text = "💳 <b>账户充值</b>\n\n系统正在接入 USDT 自动充值通道，目前如需充值余额，请联系客服。"
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
+def referral_reward_sync_loop():
+    while True:
+        try:
+            sync_referral_rewards()
+        except Exception as exc:
+            print("⚠️ 邀请返佣同步异常：", repr(exc), flush=True)
+        time.sleep(20)
+
+
 if __name__ == "__main__":
     print("🤖 晴天号铺机器人启动中...", flush=True)
     try:
+        import threading
+        threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
         bot.remove_webhook()
         print("✅ Webhook 已清理，开始 long polling", flush=True)
         bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
