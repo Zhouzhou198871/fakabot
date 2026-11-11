@@ -7,7 +7,7 @@ ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
 if not TOKEN:
     raise RuntimeError("缺少环境变量 BOT_TOKEN，请在服务器环境中配置机器人 Token。")
 bot = telebot.TeleBot(TOKEN, threaded=False)
-USERS_FILE = "/root/fakabot/users.json"
+USERS_FILE = "/root/fakabot/users.json"  # logical key only; business data is stored in Telegram
 
 EMOJI = {
     "usdt": "5001485391807645910", "tg": "5001558608115140737", "gear": "6244525025500601411",
@@ -142,23 +142,25 @@ WITHDRAW_MINIMUM = 10.0
 WITHDRAWALS_FILE = "/root/fakabot/withdrawals.json"
 ORDERS_FILE = "/root/fakabot/orders.json"
 
+ARCHIVE_CHAT_ID = os.getenv("TELEGRAM_ARCHIVE_CHAT_ID", "-1004459109788").strip()
+ARCHIVE_STORE = None
+
+def _archive_key(path):
+    name = os.path.basename(str(path))
+    keys = {"users.json": "users", "orders.json": "orders", "withdrawals.json": "withdrawals"}
+    if name not in keys:
+        raise ValueError("未登记的业务数据类型，拒绝写入本地文件")
+    return keys[name]
+
 def load_json_file(path, default):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            value = json.load(f)
-        return value
-    except (FileNotFoundError, json.JSONDecodeError):
-        return default
+    if ARCHIVE_STORE is None:
+        raise RuntimeError("Telegram 归档存储尚未初始化，拒绝读取本地业务数据")
+    return ARCHIVE_STORE.load(_archive_key(path), default)
 
 def save_json_file(path, value):
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    temp = path + ".tmp"
-    with open(temp, "w", encoding="utf-8") as f:
-        json.dump(value, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temp, path)
+    if ARCHIVE_STORE is None:
+        raise RuntimeError("Telegram 归档存储尚未初始化，拒绝写入本地业务数据")
+    ARCHIVE_STORE.save(_archive_key(path), value)
 
 def bind_referrer(uid, start_payload):
     """Bind an inviter once only. Existing bindings are never overwritten."""
@@ -347,26 +349,24 @@ def valid_tron_address(address):
 
 
 def get_user(uid, name=""):
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump({}, f)
-    with open(USERS_FILE, "r", encoding="utf-8") as f: users = json.load(f)
+    users = load_json_file(USERS_FILE, {})
     uid_str = str(uid)
+    changed = False
     if uid_str not in users:
         users[uid_str] = {"name": name, "join_time": time.time(), "balance": 0.0, "orders_count": 0, "invited_count": 0, "invite_bonus": 0.0, "language": "zh"}
-        with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump(users, f, ensure_ascii=False, indent=2)
+        changed = True
     users[uid_str].setdefault("language", "zh")
-    if name:
+    if name and users[uid_str].get("name") != str(name):
         users[uid_str]["name"] = str(name)
-        with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(users, f, ensure_ascii=False, indent=2)
+        changed = True
+    if changed:
+        save_json_file(USERS_FILE, users)
     return users[uid_str]
 
 def set_user_language(uid, language):
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        users = json.load(f)
+    users = load_json_file(USERS_FILE, {})
     users.setdefault(str(uid), {})["language"] = language
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+    save_json_file(USERS_FILE, users)
 
 def enforce_two_column_keyboard(kb):
     """Normalize every inline keyboard to two buttons per row; pad odd counts with a main-menu action."""
@@ -1097,10 +1097,24 @@ if __name__ == "__main__":
     print("🤖 晴天号铺机器人启动中...", flush=True)
     try:
         import threading
+        from telegram_storage import TelegramArchiveStore
+        global ARCHIVE_STORE
+        legacy_paths = {
+            "users": USERS_FILE,
+            "orders": ORDERS_FILE,
+            "withdrawals": WITHDRAWALS_FILE,
+        }
+        ARCHIVE_STORE = TelegramArchiveStore(
+            bot=bot,
+            chat_id=ARCHIVE_CHAT_ID,
+            legacy_paths=legacy_paths,
+        )
+        ARCHIVE_STORE.initialize()
+        print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
         threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
         bot.remove_webhook()
-        print("✅ Webhook 已清理，开始 long polling", flush=True)
-        bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
+        print("✅ Webhook 已清理，保留待处理更新，开始 long polling", flush=True)
+        bot.infinity_polling(skip_pending=False, timeout=30, long_polling_timeout=30)
     except KeyboardInterrupt:
         print("🛑 收到停止信号，机器人退出", flush=True)
     except Exception as exc:
