@@ -44,6 +44,9 @@ jobs:
       - name: Test Telegram archive recovery and rollback
         run: python -m unittest discover -s tests -v
 
+      - name: Install bot dependencies
+        run: pip install -r requirements.txt
+
       - name: Smoke-test bot menu construction
         env:
           BOT_TOKEN: "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
