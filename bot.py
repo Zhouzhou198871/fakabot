@@ -1,730 +1,227 @@
 # -*- coding: utf-8 -*-
-"""FakaBot: Telegram storefront + confirmed TRC20 USDT payment + auto delivery.
-
-Required environment:
-  BOT_TOKEN, ADMIN_ID, TRON_RECEIVE_ADDRESS, TRONGRID_API_KEY
-
-Optional:
-  PRODUCT_PRICE_USDT=10
-  PAYMENT_TTL_MINUTES=15
-  TRONGRID_BASE_URL=https://api.trongrid.io
-  TRON_USDT_CONTRACT=TR7NHqjeKQxGTCi8q8ZY4p4L8otSzgjLj6t
-  PAYMENT_POLL_SECONDS=8
-
-No wallet private key is used or needed: this service only verifies deposits.
-"""
-
-import os
-import json
-import html
-import time
-import uuid
-import random
-import logging
-import threading
-import tempfile
-from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone, timedelta
-
-import telebot
+import telebot, time, json, os, requests
 from telebot import types
-from telebot.apihelper import ApiTelegramException
-from filelock import FileLock
 
-from payment_listener import PaymentWatcher, USDT_DECIMALS
+TOKEN = "8938905914:AAF7og--rRBPasko6ZXAXVx16yw51smucv8"
+bot = telebot.TeleBot(TOKEN, threaded=False)
+USERS_FILE = "/root/fakabot/users.json"
 
-TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
-PRODUCT_PRICE = Decimal(os.getenv("PRODUCT_PRICE_USDT", "10"))
-PAYMENT_TTL_MINUTES = int(os.getenv("PAYMENT_TTL_MINUTES", "15"))
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USERS_FILE = os.path.join(BASE_DIR, "users.json")
-ORDERS_FILE = os.path.join(BASE_DIR, "orders.json")
-CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-STOCK_FILE = os.path.join(BASE_DIR, "stock.txt")
-LOCK_FILE = os.path.join(BASE_DIR, ".fakabot-data.lock")
-
-CHANNEL_URL = "https://t.me/qingtian_vip"
-SUPPORT_URL = "https://t.me/qingtian_Boss"
-RECEIVE_ADDRESS = os.getenv("TRON_RECEIVE_ADDRESS", "")
-
-DEFAULT_CONFIG = {
-    "welcome_tip": "点击下方按钮即可挑选心仪商品，系统全自动发货。",
-    "buy_button_text": "🛒 立即购买"
+EMOJI = {
+    "usdt": "5001485391807645910", "tg": "5001558608115140737", "gear": "6244525025500601411",
+    "gift": "6246956045709612135", "diamond": "6244585885187184999", "star": "6244603610517215237",
+    "apple": "5001358570013329603", "ai": "6289722534019475465", "video": "5001404418789214347",
+    "node": "6244694135542913498"
 }
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.path.join(BASE_DIR, "bot.log"), encoding="utf-8")
-    ]
-)
-logger = logging.getLogger("fakabot")
-DATA_LOCK = threading.RLock()
-FILE_LOCK = FileLock(LOCK_FILE, timeout=20)
-ADMIN_EDIT_STATE = {}
+APPLE_PRODUCTS = [{"id": "a1", "name": "🤝美区 共享账号 | 已购小伙剪APP", "price": "2.78"}, {"id": "a2", "name": "🤝香港 | 注册半年左右", "price": "2.78"}]
+TG_PRODUCTS = [{"id": "t1", "name": "✈️ 美国 +1 成品号", "price": "4.5"}]
+AI_PRODUCTS = [{"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"}]
+NODE_PRODUCTS = [{"id": "n1", "name": "🌐 高速专线节点 100G", "price": "10.0"}]
 
-if not TOKEN or TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
-    raise RuntimeError("请设置 BOT_TOKEN。")
-if ADMIN_ID <= 0 or not RECEIVE_ADDRESS:
-    raise RuntimeError("请正确设置 ADMIN_ID 和 TRON_RECEIVE_ADDRESS。")
-if PRODUCT_PRICE <= 0 or PAYMENT_TTL_MINUTES < 1:
-    raise RuntimeError("商品价格和支付有效期配置无效。")
+def get_user(uid, name=""):
+    if not os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump({}, f)
+    with open(USERS_FILE, "r", encoding="utf-8") as f: users = json.load(f)
+    uid_str = str(uid)
+    if uid_str not in users:
+        users[uid_str] = {"name": name, "join_time": time.time(), "balance": 0.0, "orders_count": 0, "invited_count": 0, "invite_bonus": 0.0}
+        with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump(users, f, ensure_ascii=False, indent=2)
+    return users[uid_str]
 
-bot = telebot.TeleBot(TOKEN, parse_mode="HTML", threaded=True, num_threads=8)
+def safe_edit(bot, chat_id, msg_id, text, kb=None):
+    try: bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text, parse_mode="HTML", reply_markup=kb)
+    except: pass
 
-
-# -------------------- durable storage --------------------
-
-def atomic_write_text(path, content):
-    directory = os.path.dirname(path) or "."
-    fd, temp_path = tempfile.mkstemp(prefix=".tmp_", dir=directory)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp_path, path)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
-
-
-def atomic_write_json(path, data):
-    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-
-
-def load_json(path, expected, default):
-    if not os.path.exists(path):
-        return default.copy()
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            value = json.load(f)
-        if not isinstance(value, expected):
-            raise ValueError("JSON root type mismatch")
-        return value
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        backup = path + ".corrupt"
-        if not os.path.exists(backup):
-            try:
-                os.replace(path, backup)
-            except OSError:
-                logger.exception("Failed to back up corrupt JSON: %s", path)
-        raise RuntimeError(f"{path} 数据损坏，已尝试备份；请检查备份文件后再启动。")
-
-
-def ensure_files():
-    with FILE_LOCK:
-        for path, value in (
-            (USERS_FILE, {}),
-            (ORDERS_FILE, []),
-            (CONFIG_FILE, DEFAULT_CONFIG),
-        ):
-            if not os.path.exists(path):
-                atomic_write_json(path, value)
-        if not os.path.exists(STOCK_FILE):
-            atomic_write_text(STOCK_FILE, "")
-
-
-def read_json(path, expected, default):
-    with FILE_LOCK:
-        return load_json(path, expected, default)
-
-
-def read_stock():
-    with open(STOCK_FILE, "r", encoding="utf-8") as f:
-        return [line.rstrip("\r\n") for line in f if line.strip()]
-
-
-def write_stock(items):
-    if any("\n" in x or "\r" in x for x in items):
-        raise ValueError("每条卡密必须独占一行")
-    atomic_write_text(STOCK_FILE, "".join(x + "\n" for x in items))
-
-
-def esc(value):
-    return html.escape(str(value), quote=True)
-
-
-def utc_now():
-    return datetime.now(timezone.utc)
-
-
-def iso_now():
-    return utc_now().isoformat(timespec="seconds")
-
-
-def is_admin(uid):
-    return int(uid) == ADMIN_ID
-
-
-def safe_send(chat_id, text, **kwargs):
-    try:
-        return bot.send_message(chat_id, text, **kwargs)
-    except Exception:
-        logger.exception("Telegram send_message failed; chat_id=%s", chat_id)
-        return None
-
-
-# -------------------- users / UI --------------------
-
-def get_user(user):
-    uid = str(user.id)
-    with FILE_LOCK:
-        users = load_json(USERS_FILE, dict, {})
-        record = users.get(uid) or {
-            "user_id": user.id,
-            "balance": "0.00",
-            "first_seen": iso_now()
-        }
-        record["first_name"] = user.first_name or ""
-        record["username"] = user.username or ""
-        record.setdefault("first_seen", iso_now())
-        record.setdefault("balance", "0.00")
-        users[uid] = record
-        atomic_write_json(USERS_FILE, users)
-        return record
-
-
-def companion_days(first_seen):
-    try:
-        dt = datetime.fromisoformat(first_seen.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return max(0, (utc_now() - dt.astimezone(timezone.utc)).days)
-    except Exception:
-        return 0
-
-
-def get_config():
-    config = read_json(CONFIG_FILE, dict, DEFAULT_CONFIG.copy())
-    for key, value in DEFAULT_CONFIG.items():
-        config.setdefault(key, value)
-    return config
-
-
-def main_keyboard(config):
+def get_main_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
-    label = str(config.get("buy_button_text") or DEFAULT_CONFIG["buy_button_text"])[:64]
-    kb.row(
-        types.InlineKeyboardButton(label, callback_data="buy"),
-        types.InlineKeyboardButton("👤 历史订单", callback_data="orders")
-    )
-    kb.row(
-        types.InlineKeyboardButton("📢 官方频道", url=CHANNEL_URL),
-        types.InlineKeyboardButton("💬 联系客服", url=SUPPORT_URL)
-    )
-    return kb
-
-
-def welcome_text(user, record, config):
-    try:
-        balance = Decimal(str(record.get("balance", "0"))).quantize(Decimal("0.01"))
-    except InvalidOperation:
-        balance = Decimal("0.00")
-    tip = esc(config.get("welcome_tip", DEFAULT_CONFIG["welcome_tip"]))
-    return (
-        f"✨ <b>尊敬的 {esc(user.first_name or '用户')}，欢迎光临！</b>\n\n"
-        "📌 <b>您的专属账户信息</b>\n"
-        f" ├ 🆔 <b>用户 ID：</b> <code>{user.id}</code>\n"
-        f" ├ 💰 <b>账户余额：</b> <b>{balance}</b> USDT\n"
-        f" └ ⏳ <b>相伴天数：</b> 已陪伴您 <b>{companion_days(record['first_seen'])}</b> 天\n\n"
-        "━━━━━━━━━━━━━━━━\n"
-        f"🛒 <b>自助选购</b>：{tip}\n"
-        "🛡 <b>安全提示</b>：请妥善保管您的账号密码，虚拟商品售出概不退换。\n\n"
-        f"📢 <b>内置节点频道</b>：<a href=\"{CHANNEL_URL}\">点击加入</a>\n"
-        f"💬 <b>专属客服</b>：<a href=\"{SUPPORT_URL}\">@qingtian_Boss</a>\n\n"
-        '<tg-emoji emoji-id="5368324170671202286">✨</tg-emoji>'
-    )
-
-
-@bot.message_handler(commands=["start"])
-def start(message):
-    try:
-        record = get_user(message.from_user)
-        bot.send_message(
-            message.chat.id,
-            welcome_text(message.from_user, record, get_config()),
-            reply_markup=main_keyboard(get_config()),
-            disable_web_page_preview=True
-        )
-    except Exception:
-        logger.exception("/start failed")
-        safe_send(message.chat.id, "系统暂时繁忙，请稍后重试。")
-
-
-# -------------------- payment order creation --------------------
-
-def amount_to_raw(amount):
-    scaled = amount * (Decimal(10) ** USDT_DECIMALS)
-    if scaled != scaled.to_integral_value():
-        raise ValueError("支付金额超过 USDT 支持的小数精度")
-    return int(scaled)
-
-
-def raw_to_amount(raw):
-    return (Decimal(int(raw)) / (Decimal(10) ** USDT_DECIMALS)).quantize(
-        Decimal("0.000001")
-    )
-
-
-def create_payment_order(user):
-    uid = str(user.id)
-    with FILE_LOCK:
-        orders = load_json(ORDERS_FILE, list, [])
-        for old in orders:
-            if old.get("user_id") == user.id and old.get("payment_status") == "pending":
-                if utc_now().timestamp() * 1000 < int(old.get("expires_at_ms", 0)):
-                    return None, old
-
-        # Use a random 1..999999 micro-USDT suffix to distinguish concurrent payments.
-        # Keep amounts unique across the recent 48-hour payment/reconciliation
-        # window. The random suffix is 0.000001..0.009999 USDT (max +0.01).
-        # A transfer from an older order cannot match a new order because its
-        # on-chain block timestamp must be >= the new order creation timestamp.
-        recent_cutoff = int((utc_now() - timedelta(hours=48)).timestamp() * 1000)
-        used = {
-            int(o["amount_raw"]) for o in orders
-            if str(o.get("amount_raw", "")).isdigit()
-            and int(o.get("created_at_ms", 0)) >= recent_cutoff
-        }
-        base_raw = amount_to_raw(PRODUCT_PRICE)
-        for _ in range(10000):
-            suffix = random.randint(1, 9999)
-            amount_raw = base_raw + suffix
-            if amount_raw not in used:
-                break
-        else:
-            raise RuntimeError("无法生成唯一支付金额，请稍后重试")
-
-        created = utc_now()
-        expires = created + timedelta(minutes=PAYMENT_TTL_MINUTES)
-        order = {
-            "order_id": uuid.uuid4().hex[:16].upper(),
-            "user_id": user.id,
-            "username": user.username or "",
-            "first_name": user.first_name or "",
-            "created_at": created.isoformat(timespec="seconds"),
-            "created_at_ms": int(created.timestamp() * 1000),
-            "expires_at": expires.isoformat(timespec="seconds"),
-            "expires_at_ms": int(expires.timestamp() * 1000),
-            "product": "自动发卡商品",
-            "price_base": str(PRODUCT_PRICE),
-            "amount_raw": str(amount_raw),
-            "amount": str(raw_to_amount(amount_raw)),
-            "payment_status": "pending",
-            "status": "pending_payment",
-            "txid": None,
-            "delivery_status": "not_started"
-        }
-        orders.append(order)
-        atomic_write_json(ORDERS_FILE, orders)
-        return order, None
-
-
-def payment_keyboard(order):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔄 刷新支付状态 / 倒计时", callback_data=f"paycheck:{order['order_id']}"))
-    return kb
-
-
-def payment_message(order):
-    return (
-        "💳 <b>USDT 订单已创建</b>\n\n"
-        f"🧾 订单号：<code>{esc(order['order_id'])}</code>\n"
-        f"💰 请准确转账：<b>{esc(order['amount'])} USDT</b>\n"
-        "🌐 网络：<b>TRON / TRC20</b>\n"
-        f"🏦 收款地址：\n<code>{esc(RECEIVE_ADDRESS)}</code>\n\n"
-        f"⏳ 有效期：<b>{PAYMENT_TTL_MINUTES} 分钟</b>\n"
-        f"⌛ 截止时间（UTC）：<code>{esc(order['expires_at'])}</code>\n\n"
-        "⚠️ 请使用 TRC20 网络，并转入上方显示的精确金额。"
-        "少转、多转、使用其他网络或超时到账都不会自动发货。\n"
-        "链上确认后机器人会自动发送卡密。"
-    )
-
-
-@bot.callback_query_handler(func=lambda c: c.data == "buy")
-def buy_callback(call):
-    try:
-        bot.answer_callback_query(call.id)
-        get_user(call.from_user)
-        order, existing = create_payment_order(call.from_user)
-        if existing:
-            bot.send_message(
-                call.message.chat.id,
-                "⚠️ <b>你已有待支付订单。</b>\n\n" + payment_message(existing),
-                reply_markup=payment_keyboard(existing)
-            )
-            return
-        bot.send_message(
-            call.message.chat.id, payment_message(order),
-            reply_markup=payment_keyboard(order)
-        )
-    except Exception:
-        logger.exception("创建支付订单失败")
-        safe_send(call.message.chat.id, "创建订单失败，请稍后重试或联系客服。")
-
-
-# -------------------- chain payment and delivery --------------------
-
-def update_order(order_id, mutator):
-    with FILE_LOCK:
-        orders = load_json(ORDERS_FILE, list, [])
-        for order in orders:
-            if order.get("order_id") == order_id:
-                mutator(order)
-                atomic_write_json(ORDERS_FILE, orders)
-                return dict(order)
-    return None
-
-
-def on_payment_confirmed(order_id, transfer):
-    """Called only for a confirmed, exact-amount, in-window transfer."""
-    def mark_paid(order):
-        # Accept an order already marked expired only when watcher has verified
-        # the chain block timestamp is still within the original payment window.
-        if order.get("payment_status") not in ("pending", "expired"):
-            return
-        if int(transfer.get("block_timestamp_ms", 0)) > int(order.get("expires_at_ms", 0)):
-            return
-        order["payment_status"] = "paid"
-        order["status"] = "paid"
-        order["paid_at"] = iso_now()
-        order["txid"] = transfer["txid"]
-        order["chain_transfer"] = transfer
-
-    order = update_order(order_id, mark_paid)
-    if not order or order.get("payment_status") != "paid":
-        return
-    logger.info("Payment confirmed: order=%s txid=%s", order_id, transfer["txid"])
-    deliver_paid_order(order_id)
-
-
-def deliver_paid_order(order_id):
-    """At-most-once delivery attempt with a persisted reservation journal."""
-    with FILE_LOCK:
-        orders = load_json(ORDERS_FILE, list, [])
-        order = next((o for o in orders if o.get("order_id") == order_id), None)
-        if not order or order.get("payment_status") != "paid":
-            return
-        if order.get("delivery_status") != "not_started":
-            return
-
-        stock = read_stock()
-        if not stock:
-            order["delivery_status"] = "blocked_no_stock"
-            order["delivery_error"] = "库存为空"
-            atomic_write_json(ORDERS_FILE, orders)
-            safe_send(ADMIN_ID, f"🚨 订单 {esc(order_id)} 已付款，但库存为空，请人工处理。")
-            return
-
-        card = stock[0]
-        # Persist reservation intent before stock mutation. Startup recovery
-        # removes this card if the process died between these two writes.
-        order["delivery_status"] = "sending"
-        order["delivery_started_at"] = iso_now()
-        order["product"] = card
-        atomic_write_json(ORDERS_FILE, orders)
-        try:
-            write_stock(stock[1:])
-        except Exception:
-            logger.exception("扣减库存失败；订单保持 sending，需管理员核查")
-            safe_send(ADMIN_ID, f"⚠️ 订单 {esc(order_id)} 已进入发货保留状态，但库存写入失败，请人工核查。")
-            return
-        target_user_id = int(order["user_id"])
-
-    # An ambiguous Telegram timeout must not trigger an automatic resend.
-    sent = safe_send(
-        target_user_id,
-        "🎉 <b>支付确认成功，自动发货完成！</b>\n\n"
-        f"🧾 订单号：<code>{esc(order_id)}</code>\n"
-        f"💰 实付：<b>{esc(order['amount'])} USDT</b>\n"
-        f"📦 卡密：\n<code>{esc(card)}</code>\n\n请妥善保存。"
-    )
-
-    if sent:
-        def mark_delivered(o):
-            o["delivery_status"] = "delivered"
-            o["status"] = "delivered"
-            o["delivered_at"] = iso_now()
-        update_order(order_id, mark_delivered)
-        logger.info("Delivered order %s", order_id)
-    else:
-        logger.error("Delivery uncertain for order %s; manual reconciliation required", order_id)
-        safe_send(
-            ADMIN_ID,
-            f"⚠️ 订单 {esc(order_id)} 已扣库存，Telegram 发送结果不确定。"
-            "为防重复发卡，系统未自动重发，请人工核查用户消息和库存。"
-        )
-
-
-def reconcile_delivery_reservations():
-    """Recover a crash between persisting a delivery reservation and stock removal."""
-    with FILE_LOCK:
-        orders = load_json(ORDERS_FILE, list, [])
-        stock = read_stock()
-        changed = False
-        for order in orders:
-            if order.get("delivery_status") != "sending":
-                continue
-            card = order.get("product")
-            if card and card in stock:
-                stock.remove(card)
-                changed = True
-        if changed:
-            write_stock(stock)
-    # Never auto-resend ambiguous deliveries; ask admin to reconcile manually.
-    for order in orders:
-        if order.get("delivery_status") == "sending":
-            safe_send(
-                ADMIN_ID,
-                f"⚠️ 检测到待人工核查的发货记录：订单 <code>{esc(order.get('order_id'))}</code>。"
-                "请核对 Telegram 消息后处理，系统不会自动重复发卡。"
-            )
-
-
-def on_late_payment(order_id, transfer):
-    def mark_late(order):
-        if order.get("payment_status") == "expired":
-            order["payment_status"] = "paid_late"
-            order["status"] = "paid_late_review"
-            order["late_paid_at"] = iso_now()
-            order["txid"] = transfer["txid"]
-            order["chain_transfer"] = transfer
-    order = update_order(order_id, mark_late)
-    if order and order.get("payment_status") == "paid_late":
-        safe_send(
-            ADMIN_ID,
-            f"⚠️ <b>检测到超时到账</b>\n订单：<code>{esc(order_id)}</code>\n"
-            f"交易：<code>{esc(transfer['txid'])}</code>\n请人工退款或处理，不会自动发货。"
-        )
-
-
-def on_order_expired(order_id):
-    with FILE_LOCK:
-        orders = load_json(ORDERS_FILE, list, [])
-        order = next((o for o in orders if o.get("order_id") == order_id), None)
-    if order:
-        safe_send(int(order["user_id"]), f"⌛ 订单 <code>{esc(order_id)}</code> 已过期，请重新下单。")
-
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("paycheck:"))
-def payment_status_callback(call):
-    try:
-        bot.answer_callback_query(call.id)
-        order_id = call.data.split(":", 1)[1]
-        orders = read_json(ORDERS_FILE, list, [])
-        order = next(
-            (o for o in orders
-             if o.get("order_id") == order_id and int(o.get("user_id", 0)) == call.from_user.id),
-            None
-        )
-        if not order:
-            bot.send_message(call.message.chat.id, "找不到该订单。")
-            return
-        status = order.get("payment_status", "unknown")
-        if status == "pending":
-            remaining = max(0, int((int(order["expires_at_ms"]) - int(utc_now().timestamp() * 1000)) / 1000))
-            mins, secs = divmod(remaining, 60)
-            bot.send_message(
-                call.message.chat.id,
-                f"⏳ 订单仍待支付，剩余时间：<b>{mins:02d}:{secs:02d}</b>。"
-            )
-        elif status == "paid":
-            bot.send_message(call.message.chat.id, "✅ 已确认到账，正在处理发货。")
-        elif status == "expired":
-            bot.send_message(call.message.chat.id, "⌛ 订单已过期，请重新下单。")
-        elif status == "paid_late":
-            bot.send_message(call.message.chat.id, "⚠️ 检测到超时到账，已转人工核查，请联系客服。")
-        else:
-            bot.send_message(call.message.chat.id, f"订单状态：{esc(status)}")
-    except Exception:
-        logger.exception("支付状态查询失败")
-        safe_send(call.message.chat.id, "暂时无法查询支付状态，请稍后重试。")
-
-
-@bot.message_handler(commands=["paystatus"])
-def paystatus_command(message):
-    try:
-        orders = read_json(ORDERS_FILE, list, [])
-        pending = [
-            o for o in orders
-            if int(o.get("user_id", 0)) == message.from_user.id
-            and o.get("payment_status") == "pending"
-        ]
-        if not pending:
-            safe_send(message.chat.id, "当前没有待支付订单。")
-            return
-        order = max(pending, key=lambda o: o.get("created_at", ""))
-        remaining = max(0, int((int(order["expires_at_ms"]) - int(utc_now().timestamp() * 1000)) / 1000))
-        mins, secs = divmod(remaining, 60)
-        safe_send(
-            message.chat.id,
-            f"🧾 订单：<code>{esc(order['order_id'])}</code>\n"
-            f"💰 应付：<b>{esc(order['amount'])} USDT</b>\n"
-            f"⏳ 剩余：<b>{mins:02d}:{secs:02d}</b>"
-        )
-    except Exception:
-        logger.exception("/paystatus failed")
-        safe_send(message.chat.id, "查询失败，请稍后重试。")
-
-# -------------------- orders --------------------
-
-def user_orders_text(user_id):
-    orders = read_json(ORDERS_FILE, list, [])
-    mine = [o for o in orders if int(o.get("user_id", 0)) == int(user_id)]
-    mine.sort(key=lambda o: o.get("created_at", ""), reverse=True)
-    if not mine:
-        return "📭 暂无订单。"
-    rows = ["📜 <b>最近 5 笔订单</b>\n"]
-    for o in mine[:5]:
-        rows.append(
-            f"🧾 <code>{esc(o.get('order_id'))}</code>\n"
-            f"💰 {esc(o.get('amount', '-'))} USDT\n"
-            f"📌 状态：<b>{esc(o.get('status', '-'))}</b>\n"
-            f"🕒 <code>{esc(o.get('created_at', '-'))}</code>\n"
-        )
-    return "\n".join(rows)
-
-
-@bot.callback_query_handler(func=lambda c: c.data == "orders")
-def orders_callback(call):
-    try:
-        bot.answer_callback_query(call.id)
-        bot.send_message(call.message.chat.id, user_orders_text(call.from_user.id))
-    except Exception:
-        logger.exception("历史订单查询失败")
-        safe_send(call.message.chat.id, "读取订单失败，请稍后重试。")
-
-
-@bot.message_handler(commands=["orders"])
-def orders_command(message):
-    safe_send(message.chat.id, user_orders_text(message.from_user.id))
-
-
-# -------------------- admin --------------------
-
-def admin_keyboard():
-    kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
-        types.InlineKeyboardButton("✏️ 修改自定义提示语", callback_data="admin_tip"),
-        types.InlineKeyboardButton("🔘 修改购买按钮文字", callback_data="admin_button"),
-        types.InlineKeyboardButton("📦 查看库存", callback_data="admin_stock")
+        types.InlineKeyboardButton("账号铺", callback_data="cat_account", icon_custom_emoji_id=EMOJI["gift"]),
+        types.InlineKeyboardButton("节点铺", callback_data="cat_node", icon_custom_emoji_id=EMOJI["node"])
+    )
+    kb.add(
+        types.InlineKeyboardButton("历史订单", callback_data="ui_orders", icon_custom_emoji_id=EMOJI["gear"]),
+        types.InlineKeyboardButton("使用帮助", callback_data="ui_help", icon_custom_emoji_id=EMOJI["star"])
+    )
+    kb.add(
+        types.InlineKeyboardButton("邀请奖励", callback_data="ui_invite", icon_custom_emoji_id=EMOJI["gift"]),
+        types.InlineKeyboardButton("充值", callback_data="ui_recharge", icon_custom_emoji_id=EMOJI["usdt"])
+    )
+    kb.add(types.InlineKeyboardButton("更多服务", callback_data="more_services", icon_custom_emoji_id=EMOJI["gear"]))
+    return kb
+
+def get_more_kb():
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.row(
+        types.InlineKeyboardButton("节点交流群", url="https://t.me/qingtian_vip"),
+        types.InlineKeyboardButton("代理频道", url="https://t.me/jiedian888")
+    )
+    kb.row(
+        types.InlineKeyboardButton("账号铺频道", url="https://t.me/qingtian_tutorial"),
+        types.InlineKeyboardButton("联系客服", callback_data="show_support")
+    )
+    kb.row(
+        types.InlineKeyboardButton("🔙 返回", callback_data="ui_buy"),
+        types.InlineKeyboardButton("☀️ 晴天", callback_data="ui_buy")
     )
     return kb
 
+def get_account_kb():
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(types.InlineKeyboardButton("苹果ID", callback_data="list_apple", icon_custom_emoji_id=EMOJI["apple"]), types.InlineKeyboardButton("TG账号", callback_data="list_tg", icon_custom_emoji_id=EMOJI["tg"]))
+    kb.add(types.InlineKeyboardButton("AI 专区", callback_data="list_ai", icon_custom_emoji_id=EMOJI["ai"]), types.InlineKeyboardButton("影音游戏", callback_data="list_video", icon_custom_emoji_id=EMOJI["video"]))
+    kb.add(types.InlineKeyboardButton("🔙 返回主菜单", callback_data="ui_buy"))
+    return kb
 
-@bot.message_handler(commands=["admin"])
-def admin_command(message):
-    if not is_admin(message.from_user.id):
-        safe_send(message.chat.id, "⛔ 无权操作。")
-        return
-    try:
-        stock_count = len(read_stock())
-        safe_send(
-            message.chat.id,
-            f"🛠 <b>管理员面板</b>\n库存：<b>{stock_count}</b> 条",
-            reply_markup=admin_keyboard()
-        )
-    except Exception:
-        logger.exception("管理员面板加载失败")
+def get_products_kb(cat_id):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if cat_id == "apple": products = APPLE_PRODUCTS
+    elif cat_id == "tg": products = TG_PRODUCTS
+    elif cat_id == "ai": products = AI_PRODUCTS
+    elif cat_id == "node": products = NODE_PRODUCTS
+    else: products = [{"id": "0", "name": "暂无商品", "price": "0"}]
+    for p in products:
+        btn = types.InlineKeyboardButton(f"{p['name']} | {p['price']} U", callback_data=f"buy_{p['id']}")
+        if cat_id == "apple": btn.icon_custom_emoji_id = EMOJI["apple"]
+        if cat_id == "tg": btn.icon_custom_emoji_id = EMOJI["tg"]
+        kb.add(btn)
+    back_btn = "cat_account" if cat_id in ["apple", "tg", "ai", "video"] else "ui_buy"
+    kb.add(types.InlineKeyboardButton("🔙 返回上一级", callback_data=back_btn))
+    return kb
 
+def get_back_kb():
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔙 返回主菜单", callback_data="ui_buy"))
+    return kb
 
-@bot.callback_query_handler(func=lambda c: c.data in ("admin_tip", "admin_button", "admin_stock"))
-def admin_callback(call):
-    if not is_admin(call.from_user.id):
-        bot.answer_callback_query(call.id, "无权操作", show_alert=True)
-        return
-    if call.data == "admin_stock":
-        bot.answer_callback_query(call.id)
-        safe_send(call.message.chat.id, f"📦 当前库存：<b>{len(read_stock())}</b> 条")
-        return
-    ADMIN_EDIT_STATE[call.from_user.id] = (
-        "welcome_tip" if call.data == "admin_tip" else "buy_button_text"
+def generate_main_text(user, uid):
+    return (
+        f"<tg-emoji emoji-id=\"{EMOJI['star']}\">✨</tg-emoji> <b>欢迎光临晴天号铺。</b>\n\n"
+        f"<tg-emoji emoji-id=\"{EMOJI['gear']}\">📌</tg-emoji> <b>您的专属账户信息</b>\n"
+        f" ├ 🆔 <b>用户 ID：</b> <code>{uid}</code>\n"
+        f" ├ <tg-emoji emoji-id=\"{EMOJI['usdt']}\">💰</tg-emoji> <b>账户余额：</b> <b>{user['balance']:.2f}</b> USDT\n"
+        f" ├ 🛒 <b>订单记录：</b> {user.get('orders_count', 0)} 单\n"
+        f" ├ 👥 <b>邀请用户：</b> {user.get('invited_count', 0)} 位\n"
+        f" └ 🎁 <b>邀请奖励：</b> 累计 {user.get('invite_bonus', 0.0):.2f} USDT\n\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"<tg-emoji emoji-id=\"{EMOJI['gift']}\">🛒</tg-emoji> <b>自助选购</b>：点击下方按钮即可挑选。"
     )
+
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    user = get_user(message.from_user.id, message.from_user.first_name or "老板")
+    text = generate_main_text(user, message.from_user.id)
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=get_main_kb())
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_buy")
+def show_main_menu(call):
     bot.answer_callback_query(call.id)
-    safe_send(call.message.chat.id, "请发送新内容，发送 /cancel 取消。")
+    user = get_user(call.from_user.id)
+    text = generate_main_text(user, call.from_user.id)
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_main_kb())
 
+@bot.callback_query_handler(func=lambda call: call.data == "more_services")
+def show_more_menu(call):
+    bot.answer_callback_query(call.id)
+    text = "加入官方社群，获取最新动态。\n如有任何疑问，请随时联系客服为您解答。\n\n👇 请选择需要的服务："
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_more_kb())
 
-@bot.message_handler(commands=["cancel"])
-def cancel_command(message):
-    if is_admin(message.from_user.id):
-        ADMIN_EDIT_STATE.pop(message.from_user.id, None)
-        safe_send(message.chat.id, "已取消。")
-
-
-@bot.message_handler(commands=["addstock"])
-def addstock_command(message):
-    if not is_admin(message.from_user.id):
-        safe_send(message.chat.id, "⛔ 无权操作。")
-        return
-    parts = (message.text or "").split(maxsplit=1)
-    if len(parts) != 2 or not parts[1].strip():
-        safe_send(message.chat.id, "用法：<code>/addstock 卡密内容</code>")
-        return
-    with FILE_LOCK:
-        stock = read_stock()
-        stock.append(parts[1].strip())
-        write_stock(stock)
-    safe_send(message.chat.id, f"✅ 补货成功，库存 {len(stock)} 条。")
-
-
-@bot.message_handler(
-    func=lambda m: m.from_user is not None
-    and is_admin(m.from_user.id)
-    and m.from_user.id in ADMIN_EDIT_STATE,
-    content_types=["text"]
-)
-def admin_config_input(message):
-    field = ADMIN_EDIT_STATE.get(message.from_user.id)
-    value = (message.text or "").strip()
-    if not value or len(value) > 500 or (field == "buy_button_text" and len(value) > 64):
-        safe_send(message.chat.id, "内容为空或长度超限，请重新发送。")
-        return
-    with FILE_LOCK:
-        config = load_json(CONFIG_FILE, dict, DEFAULT_CONFIG.copy())
-        config[field] = value
-        atomic_write_json(CONFIG_FILE, config)
-    ADMIN_EDIT_STATE.pop(message.from_user.id, None)
-    safe_send(message.chat.id, "✅ 配置已保存，立即生效。")
-
-
-# -------------------- startup --------------------
-
-def main():
-    ensure_files()
-    reconcile_delivery_reservations()
-    watcher = PaymentWatcher(
-        orders_file=ORDERS_FILE,
-        lock_file=LOCK_FILE,
-        on_payment=on_payment_confirmed,
-        on_late_payment=on_late_payment,
-        on_expired=on_order_expired,
+# 🌟 联系客服：自动抓取机器人头像发送
+@bot.callback_query_handler(func=lambda call: call.data == "show_support")
+def show_support(call):
+    bot.answer_callback_query(call.id)
+    text = (
+        "如果在购买或使用过程中遇到任何问题，请点击下方按钮联系人工客服。\n\n"
+        "⏰ <b>客服在线时间：</b> 09:00 - 24:00"
     )
-    watcher.start()
-    logger.info("FakaBot started; TRC20 receiving address=%s", RECEIVE_ADDRESS)
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.row(
+        types.InlineKeyboardButton("👨‍💻 主客服 @qingtian_Boss", url="https://t.me/qingtian_Boss"),
+        types.InlineKeyboardButton("🔙 返回", callback_data="more_services")
+    )
+    
+    try: bot.delete_message(call.message.chat.id, call.message.message_id)
+    except: pass
 
-    try:
-        bot.infinity_polling(
-            timeout=30,
-            long_polling_timeout=30,
-            skip_pending=False
+    # 抓取机器人自己的头像
+    photos = bot.get_user_profile_photos(call.bot.id, limit=1)
+    if photos.total_count > 0:
+        file_id = photos.photos[0][-1].file_id
+        bot.send_photo(call.message.chat.id, file_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    else:
+        # 没头像就兜底发文字
+        bot.send_message(call.message.chat.id, "💬 <b>联系客服</b>\n" + text, parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: call.data == "cat_account")
+def show_account_menu(call):
+    bot.answer_callback_query(call.id)
+    safe_edit(bot, call.message.chat.id, call.message.message_id, "🛍 <b>账号铺</b>\n👇 <i>请选择：</i>", get_account_kb())
+
+@bot.callback_query_handler(func=lambda call: call.data == "cat_node")
+def show_node_menu(call):
+    bot.answer_callback_query(call.id)
+    safe_edit(bot, call.message.chat.id, call.message.message_id, "🚀 <b>节点铺</b>\n👇 <i>请选择：</i>", get_products_kb("node"))
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("list_"))
+def show_category_list(call):
+    cat_id = call.data.replace("list_", "")
+    titles = {"apple": "🍎 <b>苹果ID 专区</b>", "tg": "✈️ <b>TG账号 专区</b>", "ai": "🤖 <b>AI 专区</b>", "video": "🎬 <b>影音游戏</b>"}
+    safe_edit(bot, call.message.chat.id, call.message.message_id, f"{titles.get(cat_id, '商品列表')}\n👇 <i>请选择：</i>", get_products_kb(cat_id))
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
+def buy_item(call):
+    prod_id = call.data.replace("buy_", "")
+    all_products = APPLE_PRODUCTS + TG_PRODUCTS + AI_PRODUCTS + NODE_PRODUCTS
+    p = next((x for x in all_products if x["id"] == prod_id), None)
+    if not p: return
+    
+    if prod_id.startswith("a"):
+        detail = (
+            f"🛍 <b>商品详情：{p['name']}</b>\n"
+            f"💰 <b>售价：</b> <code>{p['price']} U</code>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📝 <b>【商品描述】</b>\n买后发一个链接给你，获取苹果ID和密码。仅限自用。\n\n"
+            f"⚠️ <b>禁止登录账号设置，否则后果自负</b>\n\n"
+            f"📌 <b>登录操作流程图解：</b>\n"
+            f"1. 打开 App Store 退出当前账号\n"
+            f"2. 输入卡密中的账号密码登录\n"
+            f"3. 如弹窗提示，选择【其他选项】->【不升级】\n"
+            f"4. 仅限在 App Store 登录下载，<b>千万别去设置里登！</b>\n\n"
+            f"👇 <i>点击下方【在线支付】全自动发货</i>"
         )
-    except KeyboardInterrupt:
-        logger.info("Stopping FakaBot...")
-    except Exception:
-        logger.exception("Polling stopped unexpectedly")
-        raise
-    finally:
-        watcher.stop()
+    else:
+        detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
 
+    back_cb = "list_apple" if prod_id.startswith("a") else ("list_tg" if prod_id.startswith("t") else ("list_ai" if prod_id.startswith("ai") else "cat_node"))
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(types.InlineKeyboardButton("💳 在线支付", callback_data=f"pay_{prod_id}"), types.InlineKeyboardButton("💬 联系客服", url="https://t.me/qingtian_Boss"))
+    kb.add(types.InlineKeyboardButton("🔙 返回列表", callback_data=back_cb))
+    safe_edit(bot, call.message.chat.id, call.message.message_id, detail, kb)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
+def pay_item(call):
+    bot.answer_callback_query(call.id, "⏳ 支付接口准备中", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_orders")
+def show_orders(call):
+    bot.answer_callback_query(call.id, "🧾 您暂时还没有历史订单哦~", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_help")
+def show_help(call):
+    text = "❓ <b>使用帮助</b>\n\n• 购买流程：选择分类 -> 选择商品 -> 支付 -> 自动发货。\n• 售后说明：虚拟商品售出概不退换，如有问题请点击【联系客服】。"
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_invite")
+def show_invite(call):
+    bot_username = bot.get_me().username
+    invite_link = f"https://t.me/{bot_username}?start={call.from_user.id}"
+    text = f"🎁 <b>邀请奖励</b>\n\n邀请好友注册并使用本机器人，即可获得丰厚返佣。\n\n🔗 <b>您的专属链接：</b>\n<code>{invite_link}</code>"
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_recharge")
+def show_recharge(call):
+    text = "💳 <b>账户充值</b>\n\n系统正在接入 USDT 自动充值通道，目前如需充值余额，请联系客服。"
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
 if __name__ == "__main__":
-    main()
+    print("🔥 自动抓取头像客服版已启动...")
+    bot.polling(non_stop=True)
