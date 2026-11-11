@@ -1388,7 +1388,7 @@ def three_hour_report_text(start_at, end_at, counters, report_tz):
             if not isinstance(order, dict) or not _order_is_paid(order):
                 continue
             paid_at = _metric_time(
-                order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at"),
+                order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at") or order.get("created_at"),
                 report_tz,
             )
             if paid_at and start_at <= paid_at < end_at:
