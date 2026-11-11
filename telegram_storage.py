@@ -120,7 +120,7 @@ class TelegramArchiveStore:
             buffer = io.BytesIO(encoded)
             buffer.name = "qingtian_business_archive.json"
             # Keep the complete report as a channel message; attach the exact data snapshot next to it.
-            self.bot.send_message(self.chat_id, report_text, disable_web_page_preview=True)
+            self.bot.send_message(self.chat_id, report_text, parse_mode="HTML", disable_web_page_preview=True)
             caption = (
                 "☀️ 晴天号铺 · " + str(report_title) + " · 配套业务数据文件\n"
                 f"用户：{len(snapshot.get('users', {}))} 条；订单：{len(snapshot.get('orders', []))} 条；"
