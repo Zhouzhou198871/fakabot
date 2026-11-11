@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import telebot, time, json, os, re, html
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from telebot import types
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -415,6 +417,12 @@ def safe_edit(bot, chat_id, msg_id, text, kb=None):
                               reply_markup=enforce_two_column_keyboard(kb))
     except Exception as exc:
         print("⚠️ 消息更新失败：", repr(exc), flush=True)
+        if "message is not modified" not in str(exc).lower():
+            try:
+                bot.send_message(chat_id, text, parse_mode="HTML",
+                                 reply_markup=enforce_two_column_keyboard(kb))
+            except Exception as send_exc:
+                print("❌ 编辑失败后的补发也失败：", repr(send_exc), flush=True)
 
 def get_main_kb():
     """主界面：账号与节点合并为账号商城，严格两列三行。"""
@@ -1093,6 +1101,105 @@ def referral_reward_sync_loop():
         time.sleep(20)
 
 
+def daily_report_text(report_date):
+    users = load_json_file(USERS_FILE, {})
+    orders = load_json_file(ORDERS_FILE, [])
+    withdrawals = load_json_file(WITHDRAWALS_FILE, [])
+    today_users = 0
+    for user in users.values():
+        try:
+            joined = user.get("join_time")
+            if joined and datetime.fromtimestamp(float(joined)).date().isoformat() == report_date:
+                today_users += 1
+        except (TypeError, ValueError, OSError):
+            continue
+    paid_orders = [o for o in orders if isinstance(o, dict) and _order_is_paid(o)]
+    today_paid = []
+    for order in paid_orders:
+        stamp = order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at")
+        try:
+            paid_date = datetime.fromtimestamp(float(stamp)).date().isoformat() if isinstance(stamp, (int, float)) else str(stamp)[:10]
+        except (TypeError, ValueError, OSError):
+            paid_date = ""
+        if paid_date == report_date:
+            today_paid.append(order)
+    revenue = sum(_order_amount(o) for o in today_paid)
+    pending_withdrawals = sum(
+        1 for item in withdrawals
+        if isinstance(item, dict) and str(item.get("status", "")).lower() in ("pending", "review")
+    )
+    copy_text = (
+        "☀️ <b>晴天号铺 · 数字商品服务中心</b>\n"
+        "账号商城、AI 服务与节点产品信息持续整理中。\n"
+        "欢迎通过机器人查看商品规格、价格及购买说明；下单前请核对商品适用范围，具体以订单页面展示为准。\n"
+        "有订单或使用问题，可通过机器人内的官方客服入口联系。"
+    )
+    return (
+        f"☀️ <b>晴天号铺 · 每日运营工作汇报</b>\n"
+        f"统计日期：<code>{report_date}</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"用户档案：<b>{len(users)}</b> 人\n"
+        f"今日新增：<b>{today_users}</b> 人\n"
+        f"累计订单：<b>{len(orders)}</b> 笔\n"
+        f"已确认支付：<b>{len(paid_orders)}</b> 笔\n"
+        f"今日确认支付：<b>{len(today_paid)}</b> 笔\n"
+        f"今日确认金额：<b>{revenue:.2f} USDT</b>\n"
+        f"待审核提现：<b>{pending_withdrawals}</b> 笔\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<b>系统情况</b>\n"
+        "当前在线支付入口仍待接通，以上支付统计只反映归档中已有的确认记录，不代表支付链路已完成。\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<b>今日宣传文案</b>\n"
+        f"{copy_text}"
+    )
+
+
+def daily_report_loop():
+    timezone_name = os.getenv("REPORT_TIMEZONE", "Asia/Shanghai")
+    try:
+        report_tz = ZoneInfo(timezone_name)
+    except Exception:
+        print("⚠️ REPORT_TIMEZONE 无效，日报使用 UTC", flush=True)
+        report_tz = ZoneInfo("UTC")
+    while True:
+        now = datetime.now(report_tz)
+        target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        time.sleep(max(1, (target - now).total_seconds()))
+        report_date = datetime.now(report_tz).date().isoformat()
+        try:
+            meta = ARCHIVE_STORE.load("meta", {})
+            if meta.get("last_daily_report") == report_date:
+                continue
+            bot.send_message(ARCHIVE_CHAT_ID, daily_report_text(report_date),
+                             parse_mode="HTML", disable_web_page_preview=True)
+            meta["last_daily_report"] = report_date
+            ARCHIVE_STORE.save("meta", meta)
+            print("✅ 每日运营汇报已发送：" + report_date, flush=True)
+        except Exception as exc:
+            print("❌ 每日运营汇报发送失败：", repr(exc), flush=True)
+
+
+@bot.message_handler(func=lambda message: True, content_types=["text"])
+def fallback_text_message(message):
+    """Give a visible response to ordinary text that has no active conversation handler."""
+    bot.send_message(
+        message.chat.id,
+        "☀️ 已收到您的消息。请使用下方菜单继续操作；如需重新打开主菜单，请发送 /start。",
+        reply_markup=get_main_kb(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def fallback_callback_query(call):
+    """Never leave an unknown inline-button callback spinning without feedback."""
+    try:
+        bot.answer_callback_query(call.id, "该入口暂不可用，请返回主菜单。", show_alert=True)
+    except Exception as exc:
+        print("⚠️ 未识别按钮回调应答失败：", repr(exc), flush=True)
+
+
 if __name__ == "__main__":
     print("🤖 晴天号铺机器人启动中...", flush=True)
     try:
@@ -1111,6 +1218,7 @@ if __name__ == "__main__":
         ARCHIVE_STORE.initialize()
         print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
         threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
+        threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
         bot.remove_webhook()
         print("✅ Webhook 已清理，保留待处理更新，开始 long polling", flush=True)
         bot.infinity_polling(skip_pending=False, timeout=30, long_polling_timeout=30)
