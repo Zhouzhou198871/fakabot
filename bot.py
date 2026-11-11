@@ -1398,6 +1398,7 @@ def three_hour_report_text(start_at, end_at, counters, report_tz):
     end_text = end_at.strftime("%Y-%m-%d %H:%M")
     return (
         "☀️ <b>晴天号铺 · 三小时运营汇报</b>\n"
+        "平台：<b>Telegram</b> · 机器人：<b>号铺机器人</b>\n"
         f"统计日期：<code>{start_at.strftime('%Y-%m-%d')}</code>\n"
         f"统计区间：<code>{start_text} — {end_text}</code>\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -1405,11 +1406,11 @@ def three_hour_report_text(start_at, end_at, counters, report_tz):
         f"按钮交互：<b>{int(counters.get('callback_interactions', 0))}</b> 次\n"
         f"成功收入：<b>{revenue:.2f} USDT</b>\n"
         f"成功支付订单：<b>{len(paid)}</b> 笔\n"
-        f"签到：<b>{int(counters.get('checkins', 0))}</b> 次\n"
-        f"发出节点：<b>{int(counters.get('nodes_issued', 0))}</b> 个\n"
-        f"收回节点：<b>{int(counters.get('nodes_returned', 0))}</b> 个\n"
+        f"签到：<b>{int(counters.get('checkins', 0))}</b> 次（当前未接入签到事件）\n"
+        f"发出节点：<b>{int(counters.get('nodes_issued', 0))}</b> 个（当前未接入发放事件）\n"
+        f"收回节点：<b>{int(counters.get('nodes_returned', 0))}</b> 个（当前未接入回收事件）\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "<i>接待按消息和按钮操作次数累计，不做用户去重。签到及节点数量仅统计机器人已接入的成功事件。</i>"
+        "<i>接待按消息和按钮操作次数累计，不做用户去重；未接入的业务事件不会虚构统计。</i>"
     )
 
 
@@ -1589,7 +1590,10 @@ if __name__ == "__main__":
             archive_ready = True
             print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
         except Exception as archive_init_exc:
-            print("❌ Telegram 归档初始化失败；保留机器人基础响应并继续启动：", repr(archive_init_exc), flush=True)
+            # Business handlers depend on the archive store. Polling without it
+            # would make /start and every data-backed button fail silently.
+            print("❌ Telegram 归档初始化失败，停止启动并交由 systemd 重试：", repr(archive_init_exc), flush=True)
+            raise RuntimeError("业务数据归档未就绪，拒绝启动不完整的机器人实例") from archive_init_exc
 
         # Startup notifications and source archiving are auxiliary; never block polling.
         try:
