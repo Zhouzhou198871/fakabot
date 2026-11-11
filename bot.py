@@ -8,7 +8,7 @@ TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
 if not TOKEN:
     raise RuntimeError("缺少环境变量 BOT_TOKEN，请在服务器环境中配置机器人 Token。")
-bot = telebot.TeleBot(TOKEN, threaded=False)
+bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=max(8, min(32, int(os.getenv("BOT_WORKER_THREADS", "16")))))
 USERS_FILE = "/root/fakabot/users.json"  # logical key only; business data is stored in Telegram
 
 EMOJI = {
