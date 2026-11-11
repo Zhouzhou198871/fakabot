@@ -43,3 +43,16 @@ jobs:
 
       - name: Test Telegram archive recovery and rollback
         run: python -m unittest discover -s tests -v
+
+      - name: Smoke-test bot menu construction
+        env:
+          BOT_TOKEN: "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+        run: |
+          python - <<'PY'
+          import bot
+          keyboard = bot.get_main_kb()
+          assert len(keyboard.keyboard) == 3
+          assert all(len(row) == 2 for row in keyboard.keyboard)
+          assert all(button.callback_data for row in keyboard.keyboard for button in row)
+          print("Bot import and six-button main menu construction passed.")
+          PY
