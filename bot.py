@@ -575,31 +575,21 @@ def get_back_kb():
     return kb
 
 def generate_main_text(user, uid):
-    """丰富的主菜单欢迎页：正文使用 Premium 自定义表情实体。"""
-    first_name = html.escape(str(user.get("name") or "老板"))
+    """使用此前确认的晴天号铺欢迎页文案与 Telegram Premium 自定义表情。"""
     balance = float(user.get("balance", 0) or 0)
     orders = int(user.get("orders_count", 0) or 0)
     invited = int(user.get("invited_count", 0) or 0)
     bonus = float(user.get("invite_bonus", 0) or 0)
     return (
-        f'{premium_emoji("star", "✨")} <b>欢迎来到晴天号铺，{first_name}！</b>\n'
-        f'<i>一站式数字商品自助商城 · 选购方便 · 操作简单</i>\n\n'
-        f'{premium_emoji("diamond", "💎")} <b>您的账户</b>\n'
-        f'├ 用户 ID：<code>{uid}</code>\n'
-        f'├ 账户余额：<b>{balance:.2f} USDT</b>\n'
-        f'├ 累计订单：<b>{orders}</b> 单\n'
-        f'├ 邀请好友：<b>{invited}</b> 位\n'
-        f'└ 邀请奖励：<b>{bonus:.2f} USDT</b>\n\n'
-        f'━━━━━━━━━━━━━━━━━━\n'
-        f'{premium_emoji("gift", "🎁")} <b>商城精选</b>\n'
-        f'苹果账号 · Telegram 账号 · AI 服务 · 影音游戏\n\n'
-        f'{premium_emoji("node", "🌐")} <b>简单三步，轻松购买</b>\n'
-        f'① 进入账号商城，选择需要的商品\n'
-        f'② 查看商品详情，确认规格与价格\n'
-        f'③ 按页面提示完成支付，留意订单与发货消息\n\n'
-        f'{premium_emoji("gear", "🛟")} <b>需要帮助？</b>\n'
-        f'点击「使用帮助」查看说明，或进入「更多服务」联系官方客服。\n\n'
-        f'<b>请选择下方菜单，开始选购吧：</b>'
+        f'{premium_emoji("star", "✨")} <b>欢迎光临晴天号铺。</b>\\n\\n'
+        f'{premium_emoji("diamond", "📌")} <b>您的专属账户信息</b>\\n'
+        f'├ {premium_emoji("gear", "🆔")} <b>用户 ID：</b> <code>{uid}</code>\\n'
+        f'├ {premium_emoji("usdt", "💰")} <b>账户余额：</b> <b>{balance:.2f}</b> USDT\\n'
+        f'├ {premium_emoji("apple", "🛒")} <b>订单记录：</b> {orders} 单\\n'
+        f'├ {premium_emoji("tg", "👥")} <b>邀请用户：</b> {invited} 位\\n'
+        f'└ {premium_emoji("gift", "🎁")} <b>邀请奖励：</b> 累计 {bonus:.2f} USDT\\n\\n'
+        f'━━━━━━━━━━━━━━━━\\n'
+        f'{premium_emoji("star", "🛒")} <b>自助选购</b>：点击下方按钮即可挑选。'
     )
 
 @bot.message_handler(commands=['ping'])
@@ -1422,6 +1412,58 @@ def fallback_callback_query(call):
         bot.answer_callback_query(call.id, "该入口暂不可用，请返回主菜单。", show_alert=True)
     except Exception as exc:
         print("⚠️ 未识别按钮回调应答失败：", repr(exc), flush=True)
+
+
+def install_callback_safety():
+    """Acknowledge every inline callback and surface handler exceptions to the user."""
+    answered_ids = set()
+    original_answer = bot.answer_callback_query
+
+    def tracked_answer(callback_query_id, *args, **kwargs):
+        result = original_answer(callback_query_id, *args, **kwargs)
+        answered_ids.add(str(callback_query_id))
+        return result
+
+    bot.answer_callback_query = tracked_answer
+
+    for entry in bot.callback_query_handlers:
+        original_handler = entry.get("function")
+        if not callable(original_handler) or getattr(original_handler, "_qingtian_safe", False):
+            continue
+
+        def safe_handler(call, *args, _handler=original_handler, **kwargs):
+            callback_id = str(call.id)
+            answered_ids.discard(callback_id)
+            try:
+                return _handler(call, *args, **kwargs)
+            except Exception as exc:
+                print("❌ 内联按钮处理失败：", callback_id, repr(exc), flush=True)
+                if callback_id not in answered_ids:
+                    try:
+                        bot.answer_callback_query(call.id, "操作暂时失败，请重试。", show_alert=True)
+                    except Exception as answer_exc:
+                        print("⚠️ 按钮异常提示发送失败：", repr(answer_exc), flush=True)
+                if getattr(call, "message", None):
+                    try:
+                        bot.send_message(
+                            call.message.chat.id,
+                            "本次操作未完成，请返回主菜单重试。",
+                            reply_markup=get_main_kb(),
+                        )
+                    except Exception as send_exc:
+                        print("⚠️ 按钮异常补充提示失败：", repr(send_exc), flush=True)
+            finally:
+                if callback_id not in answered_ids:
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except Exception as answer_exc:
+                        print("⚠️ 按钮回执发送失败：", repr(answer_exc), flush=True)
+
+        safe_handler._qingtian_safe = True
+        entry["function"] = safe_handler
+
+
+install_callback_safety()
 
 
 if __name__ == "__main__":
