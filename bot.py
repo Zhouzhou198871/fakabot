@@ -322,14 +322,25 @@ def get_invite_friends_kb(page, pages, language="zh"):
 def get_wallet_kb(language="zh"):
     kb = types.InlineKeyboardMarkup(row_width=2)
     if language == "en":
-        kb.add(premium_button("Bind / change TRC20 wallet", callback_data="wallet_bind"))
-        kb.add(premium_button("Withdraw USDT", callback_data="wallet_withdraw"))
-        kb.add(premium_button("Back", callback_data="ui_recharge"))
+        kb.row(
+            premium_button("Bind / change wallet", callback_data="wallet_bind"),
+            premium_button("Withdraw USDT", callback_data="wallet_withdraw")
+        )
+        kb.row(
+            premium_button("Referral rewards", callback_data="ui_invite"),
+            premium_button("Back to funds", callback_data="ui_recharge")
+        )
     else:
-        kb.add(premium_button("绑定 / 更换 TRC20 钱包", callback_data="wallet_bind"))
-        kb.add(premium_button("申请提现", callback_data="wallet_withdraw"))
-        kb.add(premium_button("返回", callback_data="ui_recharge"))
+        kb.row(
+            premium_button("绑定 / 更换钱包", callback_data="wallet_bind"),
+            premium_button("申请提现", callback_data="wallet_withdraw")
+        )
+        kb.row(
+            premium_button("邀请奖励", callback_data="ui_invite"),
+            premium_button("返回资金中心", callback_data="ui_recharge")
+        )
     return kb
+
 
 def valid_tron_address(address):
     return bool(re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", str(address or "").strip()))
