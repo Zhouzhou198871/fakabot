@@ -470,7 +470,7 @@ def get_account_kb():
     return kb
 
 def get_products_kb(cat_id):
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb = types.InlineKeyboardMarkup(row_width=2)
     if cat_id == "apple": products = APPLE_PRODUCTS
     elif cat_id == "tg": products = TG_PRODUCTS
     elif cat_id == "ai": products = AI_PRODUCTS
@@ -484,7 +484,7 @@ def get_products_kb(cat_id):
     return kb
 
 def get_back_kb():
-    kb = types.InlineKeyboardMarkup()
+    kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button("🔙 返回主菜单", callback_data="ui_buy"))
     return kb
 
@@ -644,7 +644,7 @@ def show_support(call):
             "联系时建议附上订单编号和问题描述，以便客服更快定位。请勿向任何人提供账户密码或短信验证码。"
         )
         contact_label, back_label = "私信联系人工客服", "返回更多服务"
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button(contact_label, url="https://t.me/qingtian_Boss"))
     kb.add(premium_button(back_label, callback_data="more_services"))
     kb.add(premium_button("中文" if language == "en" else "English", callback_data="lang_zh" if language == "en" else "lang_en"))
@@ -884,7 +884,7 @@ def receive_wallet_address(message):
     users = load_json_file(USERS_FILE, {})
     users.setdefault(str(message.from_user.id), {})["pending_wallet_address"] = address
     save_json_file(USERS_FILE, users)
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button("Confirm and save address" if language == "en" else "核对无误，确认绑定",
                           callback_data="wallet_confirm"))
     kb.add(premium_button("Cancel" if language == "en" else "取消", callback_data="wallet_cancel"))
@@ -928,7 +928,7 @@ def wallet_withdraw(call):
     address = str(user.get("wallet_address") or "")
     balance = float(user.get("balance", 0) or 0)
     if not valid_tron_address(address):
-        kb = types.InlineKeyboardMarkup()
+        kb = types.InlineKeyboardMarkup(row_width=2)
         kb.add(premium_button("Bind wallet address" if language == "en" else "先绑定收款钱包", callback_data="wallet_bind"))
         bot.send_message(call.message.chat.id,
                          "Please bind and verify a TRC20 wallet first." if language == "en" else
@@ -964,7 +964,7 @@ def receive_withdraw_amount(message):
     user["pending_withdrawal"] = {"amount": amount, "address": address, "created_at": time.time()}
     users[uid] = user
     save_json_file(USERS_FILE, users)
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button("Confirm withdrawal request" if language == "en" else "确认提交提现申请", callback_data="wallet_withdraw_confirm"))
     kb.add(premium_button("Cancel" if language == "en" else "取消", callback_data="wallet_withdraw_cancel"))
     text = (f"Confirm withdrawal:\n<b>{amount:.2f} USDT</b>\nTRC20 address:\n<code>{html.escape(address)}</code>\n\n"
