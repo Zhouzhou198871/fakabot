@@ -415,8 +415,8 @@ def _is_premium_entity_error(exc):
 
 def _strip_premium_entities(value):
     return re.sub(
-        r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
-        r"\\1",
+        r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
+        r"\1",
         str(value or ""),
         flags=re.DOTALL,
     )
