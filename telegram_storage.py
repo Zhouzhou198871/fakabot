@@ -26,6 +26,10 @@ class TelegramArchiveStore:
 
     def _get_pinned_snapshot(self):
         chat = self.bot.get_chat(self.chat_id)
+        if getattr(chat, "type", None) != "channel":
+            raise RuntimeError("归档目标必须是 Telegram 频道，拒绝向其他聊天写入业务数据")
+        if getattr(chat, "username", None):
+            raise RuntimeError("归档频道检测到公开用户名；为保护用户隐私，拒绝写入公开频道")
         pinned = getattr(chat, "pinned_message", None)
         document = getattr(pinned, "document", None) if pinned else None
         if not document:
