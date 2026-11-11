@@ -93,5 +93,17 @@ class TelegramArchiveStoreTests(unittest.TestCase):
         self.assertEqual(store.load("users", {}), {"123": {"balance": 2}})
 
 
+    def test_meta_dictionary_can_be_saved_and_recovered(self):
+        bot = FakeBot()
+        store = TelegramArchiveStore(bot, -1004459109788)
+        store.initialize()
+        store.save("meta", {"last_daily_report": "2026-11-12"})
+        recovered = TelegramArchiveStore(bot, -1004459109788)
+        recovered.initialize()
+        self.assertEqual(
+            recovered.load("meta", {}),
+            {"last_daily_report": "2026-11-12"},
+        )
+
 if __name__ == "__main__":
     unittest.main()
