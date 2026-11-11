@@ -1433,26 +1433,41 @@ if __name__ == "__main__":
             chat_id=ARCHIVE_CHAT_ID,
             legacy_paths=legacy_paths,
         )
-        ARCHIVE_STORE.initialize()
-        print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
-        me = bot.get_me()
-        bot.send_message(
-            ARCHIVE_CHAT_ID,
-            "☀️ 晴天号铺 · 启动工作汇报\n"
-            f"机器人：@{me.username or 'unknown'}\n"
-            f"启动时间：{datetime.now().astimezone().isoformat(timespec='seconds')}\n"
-            "状态：归档连接成功，消息轮询即将启动。\n"
-            "测试指令：/ping",
-            disable_notification=True,
-        )
+        archive_ready = False
         try:
-            archive_source_bundle()
-        except Exception as archive_exc:
-            print("❌ 源码归档上传失败，不阻断机器人消息轮询：", repr(archive_exc), flush=True)
-        threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
-        threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
-        bot.remove_webhook()
-        print("✅ Webhook 已清理，保留待处理更新，开始 long polling", flush=True)
+            ARCHIVE_STORE.initialize()
+            archive_ready = True
+            print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
+        except Exception as archive_init_exc:
+            print("❌ Telegram 归档初始化失败；保留机器人基础响应并继续启动：", repr(archive_init_exc), flush=True)
+
+        # Startup notifications and source archiving are auxiliary; never block polling.
+        try:
+            me = bot.get_me()
+            bot.send_message(
+                ARCHIVE_CHAT_ID,
+                "☀️ 晴天号铺 · 启动工作汇报\n"
+                f"机器人：@{me.username or 'unknown'}\n"
+                f"启动时间：{datetime.now().astimezone().isoformat(timespec='seconds')}\n"
+                "状态：机器人正在启动消息轮询。\n"
+                "测试指令：/ping",
+                disable_notification=True,
+            )
+        except Exception as report_exc:
+            print("⚠️ 启动汇报发送失败，不影响机器人轮询：", repr(report_exc), flush=True)
+        if archive_ready:
+            try:
+                archive_source_bundle()
+            except Exception as archive_exc:
+                print("❌ 源码归档上传失败，不阻断机器人消息轮询：", repr(archive_exc), flush=True)
+            threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
+            threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
+        try:
+            bot.remove_webhook()
+            print("✅ Webhook 已清理，保留待处理更新", flush=True)
+        except Exception as webhook_exc:
+            print("⚠️ Webhook 清理失败，继续尝试 long polling：", repr(webhook_exc), flush=True)
+        print("📡 开始 long polling", flush=True)
         bot.infinity_polling(skip_pending=False, timeout=30, long_polling_timeout=30)
     except KeyboardInterrupt:
         print("🛑 收到停止信号，机器人退出", flush=True)
