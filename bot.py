@@ -250,19 +250,45 @@ def get_referral_page(uid, page=0):
     selected = invitees[page * REFERRAL_PAGE_SIZE:(page + 1) * REFERRAL_PAGE_SIZE]
     return selected, total, pages, page, spend_map
 
-def get_invite_kb(page, pages, language="zh"):
+def get_invite_kb(language="zh"):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if language == "en":
+        kb.add(premium_button("Invited friends & activity", callback_data="invite_friends_0"))
+        kb.add(premium_button("Back to main menu", callback_data="ui_buy"))
+    else:
+        kb.add(premium_button("好友名单与消费明细", callback_data="invite_friends_0"))
+        kb.add(premium_button("返回主菜单", callback_data="ui_buy"))
+    return kb
+
+def get_invite_friends_kb(page, pages, language="zh"):
     kb = types.InlineKeyboardMarkup(row_width=2)
     if language == "en":
-        kb.row(premium_button("Previous", callback_data=f"invite_page_{max(0, page-1)}"),
-               premium_button("Next", callback_data=f"invite_page_{min(pages-1, page+1)}"))
-        kb.row(premium_button("Withdraw rewards", callback_data="invite_withdraw"),
-               premium_button("Back to menu", callback_data="ui_buy"))
+        kb.row(premium_button("Previous", callback_data=f"invite_friends_{max(0,page-1)}"),
+               premium_button("Next", callback_data=f"invite_friends_{min(pages-1,page+1)}"))
+        kb.add(premium_button(f"Page {page+1} / {pages}", callback_data="invite_page_info"))
+        kb.add(premium_button("Back to referral overview", callback_data="ui_invite"))
     else:
-        kb.row(premium_button("上一页", callback_data=f"invite_page_{max(0, page-1)}"),
-               premium_button("下一页", callback_data=f"invite_page_{min(pages-1, page+1)}"))
-        kb.row(premium_button("申请提现", callback_data="invite_withdraw"),
-               premium_button("返回主菜单", callback_data="ui_buy"))
+        kb.row(premium_button("上一页", callback_data=f"invite_friends_{max(0,page-1)}"),
+               premium_button("下一页", callback_data=f"invite_friends_{min(pages-1,page+1)}"))
+        kb.add(premium_button(f"第 {page+1} / {pages} 页", callback_data="invite_page_info"))
+        kb.add(premium_button("返回邀请奖励", callback_data="ui_invite"))
     return kb
+
+def get_wallet_kb(language="zh"):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    if language == "en":
+        kb.add(premium_button("Bind / change TRC20 wallet", callback_data="wallet_bind"))
+        kb.add(premium_button("Withdraw USDT", callback_data="wallet_withdraw"))
+        kb.add(premium_button("Back", callback_data="ui_recharge"))
+    else:
+        kb.add(premium_button("绑定 / 更换 TRC20 钱包", callback_data="wallet_bind"))
+        kb.add(premium_button("申请提现", callback_data="wallet_withdraw"))
+        kb.add(premium_button("返回", callback_data="ui_recharge"))
+    return kb
+
+def valid_tron_address(address):
+    return bool(re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", str(address or "").strip()))
+
 
 def get_user(uid, name=""):
     if not os.path.exists(USERS_FILE):
@@ -585,139 +611,251 @@ def show_help(call):
     text = "❓ <b>使用帮助</b>\n\n• 购买流程：选择分类 -> 选择商品 -> 支付 -> 自动发货。\n• 售后说明：虚拟商品售出概不退换，如有问题请点击【联系客服】。"
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
-def render_invite_page(chat_id, message_id, uid, page=0):
+def render_invite_page(chat_id, message_id, uid):
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    bot_username = bot.get_me().username
+    invite_link = f"https://t.me/{bot_username}?start=ref_{uid}"
+    if language == "en":
+        text = (
+            "🎁 <b>PERMANENT REFERRAL PROGRAM</b>\n"
+            "<i>Share your personal invitation link and build a lasting referral network.</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Lifetime 5% commission</b>\n"
+            "Receive 5% of every eligible purchase successfully paid by a friend you invite. The referral relationship is permanently linked and cannot be transferred.\n\n"
+            "💳 <b>Flexible rewards</b>\n"
+            "Referral rewards are credited to your account balance and can be used for purchases or eligible withdrawals. Minimum withdrawal: 10 USDT.\n\n"
+            "🔗 <b>Your personal invitation link</b>\n"
+            f"<code>{html.escape(invite_link)}</code>\n\n"
+            "<i>Share the link with a friend. Their qualifying paid orders will contribute to your lifetime rewards.</i>"
+        )
+    else:
+        text = (
+            "🎁 <b>永久邀请奖励计划</b>\n"
+            "<i>分享专属邀请链接，建立长期有效的好友邀请关系。</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>好友消费，永久返佣 5%</b>\n"
+            "好友通过您的专属链接加入后将永久绑定。此后每笔符合条件且已成功支付的订单，您都可获得订单金额 5% 的邀请奖励，绑定关系不可转移。\n\n"
+            "💳 <b>奖励灵活使用</b>\n"
+            "邀请奖励计入账户余额，可用于购买商品，也可申请提现。提现最低门槛为 10 USDT。\n\n"
+            "🔗 <b>您的专属邀请链接</b>\n"
+            f"<code>{html.escape(invite_link)}</code>\n\n"
+            "<i>复制并分享链接给好友。好友后续成功支付的合格订单，将持续为您累计邀请奖励。</i>"
+        )
+    safe_edit(bot, chat_id, message_id, text, get_invite_kb(language))
+
+def render_invite_friends(chat_id, message_id, uid, page=0):
     sync_referral_rewards()
     user = get_user(uid)
     language = user.get("language", "zh")
     selected, total, pages, page, spend_map = get_referral_page(uid, page)
-    balance = float(user.get("balance", 0) or 0)
-    earned = float(user.get("invite_bonus", 0) or 0)
-    bot_username = bot.get_me().username
-    invite_link = f"https://t.me/{bot_username}?start=ref_{uid}"
+    lines = []
     if language == "en":
-        lines = [
-            "🎁 <b>PERMANENT REFERRAL REWARDS</b>",
-            "<i>Your invitation is permanently linked. Earn rewards from every eligible purchase made by your invited friends.</i>",
-            "",
-            "💎 <b>Commission rate:</b> 5% of each paid order, credited to your reward balance.",
-            "🔒 <b>Permanent binding:</b> once linked, the relationship cannot be changed.",
-            "💳 <b>Use of rewards:</b> available for purchases or withdrawal.",
-            "🏦 <b>Withdrawal minimum:</b> 10 USDT. Requests are reviewed before payout.",
-            "",
-            f"👥 <b>Invited friends:</b> {total}",
-            f"💰 <b>Total rewards:</b> {earned:.2f} USDT",
-            f"💼 <b>Available balance:</b> {balance:.2f} USDT",
-            "",
-            "🔗 <b>Your personal invitation link</b>",
-            f"<code>{html.escape(invite_link)}</code>",
-            "",
-            f"📋 <b>Friend activity · Page {page+1}/{pages}</b>"
-        ]
+        lines.extend(["👥 <b>INVITED FRIENDS</b>", "<i>Referral activity and verified purchase totals</i>", "",
+                      f"Total invited: <b>{total}</b>", f"Page: <b>{page+1} / {pages}</b>", "━━━━━━━━━━━━━━━━━━"])
     else:
-        lines = [
-            "🎁 <b>永久邀请奖励计划</b>",
-            "<i>每位好友通过您的专属链接加入后，将永久绑定邀请关系。</i>",
-            "",
-            "💎 <b>永久返佣：</b>好友每笔成功消费，您可获得订单金额的 5%。",
-            "🔒 <b>永久绑定：</b>绑定成功后不可转移或重复绑定。",
-            "💳 <b>奖励用途：</b>可用于购买商城商品，也可申请提现。",
-            "🏦 <b>提现门槛：</b>累计可用余额达到 10 USDT 即可申请，申请后由人工审核处理。",
-            "",
-            f"👥 <b>累计邀请好友：</b>{total} 位",
-            f"💰 <b>累计邀请奖励：</b>{earned:.2f} USDT",
-            f"💼 <b>当前可用余额：</b>{balance:.2f} USDT",
-            "",
-            "🔗 <b>您的专属邀请链接</b>",
-            f"<code>{html.escape(invite_link)}</code>",
-            "",
-            f"📋 <b>好友消费明细 · 第 {page+1}/{pages} 页</b>"
-        ]
+        lines.extend(["👥 <b>邀请好友 · 消费明细</b>", "<i>查看好友加入时间及累计成功消费</i>", "",
+                      f"累计邀请：<b>{total}</b> 位", f"当前页码：<b>{page+1} / {pages}</b>", "━━━━━━━━━━━━━━━━━━"])
     if selected:
         for index, (invitee_id, info) in enumerate(selected, start=page * REFERRAL_PAGE_SIZE + 1):
             joined = format_local_time(info.get("referred_at") or info.get("join_time"))
             spent = spend_map.get(str(invitee_id), 0.0)
-            lines.append(f"\n<b>{index}.</b> ID <code>{invitee_id}</code>  ·  {joined}")
-            lines.append(f"   {('Total spend' if language == 'en' else '累计消费')}：<b>{spent:.2f} USDT</b>")
+            if language == "en":
+                lines.append(f"\n<b>{index:02d}</b>  ·  User ID <code>{invitee_id}</code>")
+                lines.append(f"     Joined: {html.escape(joined)}  |  Spend: <b>{spent:.2f} USDT</b>")
+            else:
+                lines.append(f"\n<b>{index:02d}</b>  ·  好友 ID：<code>{invitee_id}</code>")
+                lines.append(f"     加入时间：{html.escape(joined)}")
+                lines.append(f"     累计消费：<b>{spent:.2f} USDT</b>")
     else:
-        lines.append("\n<i>No invited friends yet." if language == "en" else "\n<i>暂时还没有邀请记录，分享专属链接即可开始累计奖励。")
-        if language == "en":
-            lines[-1] += "</i>"
-        else:
-            lines[-1] += "</i>"
-    if language == "en":
-        lines.append("\n<i>Each friend is listed once. Spend totals include orders marked as successfully paid.</i>")
-    else:
-        lines.append("\n<i>每位好友仅展示一次；消费统计以系统确认成功的订单为准。</i>")
-    text = "\n".join(lines)
-    kb = get_invite_kb(page, pages, language)
-    safe_edit(bot, chat_id, message_id, text, kb)
+        lines.append("\n<i>No invited friends yet.</i>" if language == "en" else "\n<i>暂时还没有好友通过您的专属链接加入。</i>")
+    lines.append("\n<i>Totals are calculated from orders marked as successfully paid.</i>" if language == "en"
+                 else "\n<i>消费金额仅统计系统已确认成功的订单。</i>")
+    safe_edit(bot, chat_id, message_id, "\n".join(lines), get_invite_friends_kb(page, pages, language))
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_invite")
 def show_invite(call):
     bot.answer_callback_query(call.id)
-    render_invite_page(call.message.chat.id, call.message.message_id, call.from_user.id, 0)
+    render_invite_page(call.message.chat.id, call.message.message_id, call.from_user.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("invite_page_"))
-def show_invite_page(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("invite_friends_"))
+def show_invite_friends(call):
     try:
         page = int(call.data.rsplit("_", 1)[1])
     except ValueError:
         page = 0
     bot.answer_callback_query(call.id)
-    render_invite_page(call.message.chat.id, call.message.message_id, call.from_user.id, page)
+    render_invite_friends(call.message.chat.id, call.message.message_id, call.from_user.id, page)
 
-@bot.callback_query_handler(func=lambda call: call.data == "invite_withdraw")
-def invite_withdraw(call):
+@bot.callback_query_handler(func=lambda call: call.data == "invite_page_info")
+def invite_page_info(call):
+    bot.answer_callback_query(call.id)
+
+def render_wallet_page(chat_id, message_id, uid):
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    address = str(user.get("wallet_address") or "")
+    masked = (address[:7] + "…" + address[-6:]) if address else ("Not bound" if language == "en" else "尚未绑定")
+    balance = float(user.get("balance", 0) or 0)
+    if language == "en":
+        text = (
+            "👛 <b>USDT WALLET MANAGEMENT</b>\n"
+            "<i>Bind and verify your TRC20 receiving address before requesting a withdrawal.</i>\n\n"
+            f"🔗 <b>Saved TRC20 address:</b> <code>{html.escape(masked)}</code>\n"
+            f"💰 <b>Available balance:</b> <b>{balance:.2f} USDT</b>\n\n"
+            "You can replace the saved address at any time. For your security, every new address must be reviewed and confirmed before it is saved.\n"
+            "Network: <b>TRON · TRC20 · USDT</b>"
+        )
+    else:
+        text = (
+            "👛 <b>USDT 钱包管理</b>\n"
+            "<i>提现前请先绑定并核对您的 TRC20 收款地址。</i>\n\n"
+            f"🔗 <b>当前绑定地址：</b><code>{html.escape(masked)}</code>\n"
+            f"💰 <b>账户可用余额：</b><b>{balance:.2f} USDT</b>\n\n"
+            "支持随时更换钱包地址。每次新增或更换地址，都需要您核对完整地址并二次确认后才会保存。\n"
+            "收款网络：<b>TRON · TRC20 · USDT</b>"
+        )
+    safe_edit(bot, chat_id, message_id, text, get_wallet_kb(language))
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_bind")
+def wallet_bind(call):
     bot.answer_callback_query(call.id)
     user = get_user(call.from_user.id)
     language = user.get("language", "zh")
-    balance = float(user.get("balance", 0) or 0)
-    if balance < WITHDRAW_MINIMUM:
-        msg = ("The minimum withdrawal is 10 USDT. Your available balance is "
-               f"{balance:.2f} USDT.") if language == "en" else (
-               f"提现门槛为 10 USDT，您当前可用余额为 {balance:.2f} USDT。达到门槛后即可申请。")
-        bot.send_message(call.message.chat.id, msg, reply_markup=get_back_kb())
-        return
-    prompt = ("Send the amount to withdraw (minimum 10 USDT), followed by your TRC20 USDT address on the next line."
+    prompt = ("Send your TRC20 USDT address. You will be asked to verify the full address before saving it."
               if language == "en" else
-              "请按以下格式回复提现金额和 TRC20-USDT 收款地址：\n金额\nTRC20地址\n\n最低提现 10 USDT。")
+              "请发送您的 TRC20-USDT 收款地址。系统会先展示完整地址供您核对，确认后才会保存。")
     sent = bot.send_message(call.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True))
-    bot.register_next_step_handler(sent, process_withdrawal_request)
+    bot.register_next_step_handler(sent, receive_wallet_address)
 
-def process_withdrawal_request(message):
+def receive_wallet_address(message):
+    address = (message.text or "").strip()
+    user = get_user(message.from_user.id)
+    language = user.get("language", "zh")
+    if not valid_tron_address(address):
+        bot.reply_to(message, "Invalid TRON address. Please enter a valid TRC20 address starting with T." if language == "en"
+                     else "地址格式不正确。请检查是否为 TRON 网络的 TRC20 地址（通常以 T 开头），然后重新绑定。")
+        return
+    users = load_json_file(USERS_FILE, {})
+    users.setdefault(str(message.from_user.id), {})["pending_wallet_address"] = address
+    save_json_file(USERS_FILE, users)
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(premium_button("Confirm and save address" if language == "en" else "核对无误，确认绑定",
+                          callback_data="wallet_confirm"))
+    kb.add(premium_button("Cancel" if language == "en" else "取消", callback_data="wallet_cancel"))
+    preview = (f"Please verify this complete address carefully:\n<code>{html.escape(address)}</code>\n\n"
+               "Only confirm if every character is correct." if language == "en" else
+               f"请仔细核对以下完整收款地址：\n<code>{html.escape(address)}</code>\n\n确认前请逐位检查，确保网络和地址均正确。")
+    bot.send_message(message.chat.id, preview, parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_confirm")
+def wallet_confirm(call):
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(str(call.from_user.id), {})
+    address = str(user.get("pending_wallet_address") or "")
+    if not valid_tron_address(address):
+        bot.answer_callback_query(call.id, "No pending address to confirm.", show_alert=True)
+        return
+    user["wallet_address"] = address
+    user.pop("pending_wallet_address", None)
+    users[str(call.from_user.id)] = user
+    save_json_file(USERS_FILE, users)
+    bot.answer_callback_query(call.id, "Wallet address saved." if user.get("language") == "en" else "钱包地址已确认保存")
+    bot.send_message(call.message.chat.id, "Wallet address updated successfully." if user.get("language") == "en"
+                     else "钱包地址已成功绑定 / 更新。")
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_cancel")
+def wallet_cancel(call):
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(str(call.from_user.id), {})
+    user.pop("pending_wallet_address", None)
+    users[str(call.from_user.id)] = user
+    save_json_file(USERS_FILE, users)
+    bot.answer_callback_query(call.id, "Cancelled.")
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_withdraw")
+def wallet_withdraw(call):
+    bot.answer_callback_query(call.id)
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    address = str(user.get("wallet_address") or "")
+    balance = float(user.get("balance", 0) or 0)
+    if not valid_tron_address(address):
+        kb = types.InlineKeyboardMarkup()
+        kb.add(premium_button("Bind wallet address" if language == "en" else "先绑定收款钱包", callback_data="wallet_bind"))
+        bot.send_message(call.message.chat.id,
+                         "Please bind and verify a TRC20 wallet first." if language == "en" else
+                         "请先绑定并核对 TRC20 收款钱包地址，再申请提现。", reply_markup=kb)
+        return
+    if balance < WITHDRAW_MINIMUM:
+        bot.send_message(call.message.chat.id,
+                         f"Minimum withdrawal: 10 USDT. Available: {balance:.2f} USDT." if language == "en" else
+                         f"提现门槛为 10 USDT，当前可用余额 {balance:.2f} USDT，达到门槛后即可申请。")
+        return
+    prompt = ("Enter the withdrawal amount in USDT. Your saved wallet address will be shown for final confirmation."
+              if language == "en" else "请输入提现金额（USDT）。提交前系统会再次展示已绑定的钱包地址供您核对。")
+    sent = bot.send_message(call.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True))
+    bot.register_next_step_handler(sent, receive_withdraw_amount)
+
+def receive_withdraw_amount(message):
     uid = str(message.from_user.id)
     user = get_user(uid)
     language = user.get("language", "zh")
     try:
-        parts = (message.text or "").strip().split()
-        amount = round(float(parts[0]), 6)
-        address = parts[1]
-        if amount < WITHDRAW_MINIMUM:
-            raise ValueError("minimum")
-        if not re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", address):
-            raise ValueError("address")
-    except Exception:
-        bot.reply_to(message, "格式无效。请重新点击「申请提现」，按“金额 + TRC20地址”填写。" if language == "zh" else
-                     "Invalid format. Please restart the withdrawal request and provide amount plus a TRC20 address.")
+        amount = round(float((message.text or "").strip()), 6)
+    except (TypeError, ValueError):
+        bot.reply_to(message, "Invalid amount." if language == "en" else "金额格式不正确，请重新发起提现申请。")
         return
     users = load_json_file(USERS_FILE, {})
-    current = users.get(uid, {})
-    balance = float(current.get("balance", 0) or 0)
-    if amount < WITHDRAW_MINIMUM or amount > balance:
-        bot.reply_to(message, f"余额不足或金额无效。当前可用余额：{balance:.2f} USDT。")
+    user = users.get(uid, {})
+    balance = float(user.get("balance", 0) or 0)
+    address = str(user.get("wallet_address") or "")
+    if amount < WITHDRAW_MINIMUM or amount > balance or not valid_tron_address(address):
+        bot.reply_to(message, "Amount or wallet is invalid. Please check your balance and saved wallet." if language == "en"
+                     else "提现金额无效、余额不足或钱包未绑定，请检查后重新申请。")
+        return
+    user["pending_withdrawal"] = {"amount": amount, "address": address, "created_at": time.time()}
+    users[uid] = user
+    save_json_file(USERS_FILE, users)
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(premium_button("Confirm withdrawal request" if language == "en" else "确认提交提现申请", callback_data="wallet_withdraw_confirm"))
+    kb.add(premium_button("Cancel" if language == "en" else "取消", callback_data="wallet_withdraw_cancel"))
+    text = (f"Confirm withdrawal:\n<b>{amount:.2f} USDT</b>\nTRC20 address:\n<code>{html.escape(address)}</code>\n\n"
+            "Please verify the destination before submitting." if language == "en" else
+            f"请核对提现信息：\n提现金额：<b>{amount:.2f} USDT</b>\nTRC20 收款地址：\n<code>{html.escape(address)}</code>\n\n确认地址和金额无误后，再提交申请。")
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_withdraw_confirm")
+def wallet_withdraw_confirm(call):
+    uid = str(call.from_user.id)
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(uid, {})
+    pending = user.get("pending_withdrawal") or {}
+    amount = round(float(pending.get("amount", 0) or 0), 6)
+    address = str(pending.get("address") or "")
+    balance = float(user.get("balance", 0) or 0)
+    if amount < WITHDRAW_MINIMUM or amount > balance or not valid_tron_address(address) or address != user.get("wallet_address"):
+        bot.answer_callback_query(call.id, "Withdrawal details changed or invalid. Please restart.", show_alert=True)
+        user.pop("pending_withdrawal", None)
+        users[uid] = user
+        save_json_file(USERS_FILE, users)
         return
     withdrawals = load_json_file(WITHDRAWALS_FILE, [])
     request_id = f"WD{int(time.time())}{uid[-4:]}"
-    current["balance"] = round(balance - amount, 6)
-    current.setdefault("withdrawals", []).append(request_id)
-    users[uid] = current
-    withdrawals.append({
-        "request_id": request_id, "user_id": uid, "amount": amount,
-        "address": address, "status": "pending", "created_at": time.time()
-    })
+    user["balance"] = round(balance - amount, 6)
+    user.pop("pending_withdrawal", None)
+    users[uid] = user
+    withdrawals.append({"request_id": request_id, "user_id": uid, "amount": amount,
+                        "address": address, "status": "pending", "created_at": time.time()})
     save_json_file(USERS_FILE, users)
     save_json_file(WITHDRAWALS_FILE, withdrawals)
-    bot.reply_to(message, f"提现申请已提交，编号：{request_id}\n金额：{amount:.2f} USDT\n状态：待人工审核。")
+    language = user.get("language", "zh")
+    bot.answer_callback_query(call.id, "Request submitted." if language == "en" else "提现申请已提交")
+    bot.send_message(call.message.chat.id,
+                     f"Withdrawal request <b>{request_id}</b> submitted for manual review." if language == "en" else
+                     f"提现申请已提交，编号：<code>{request_id}</code>\n状态：待人工审核。", parse_mode="HTML")
     if ADMIN_ID.isdigit():
         try:
             bot.send_message(int(ADMIN_ID),
@@ -726,11 +864,34 @@ def process_withdrawal_request(message):
         except Exception:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_withdraw_cancel")
+def wallet_withdraw_cancel(call):
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(str(call.from_user.id), {})
+    user.pop("pending_withdrawal", None)
+    users[str(call.from_user.id)] = user
+    save_json_file(USERS_FILE, users)
+    bot.answer_callback_query(call.id, "Cancelled.")
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_recharge")
 def show_recharge(call):
-    text = "💳 <b>账户充值</b>\n\n系统正在接入 USDT 自动充值通道，目前如需充值余额，请联系客服。"
-    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    text = ("💳 <b>Balance & Wallet Center</b>\n\nManage your TRC20 wallet address, review it before withdrawal, and contact support for deposit assistance.\n\n<i>Automatic deposits are being integrated.</i>"
+            if language == "en" else
+            "💳 <b>账户资金与钱包中心</b>\n\n在这里管理 TRC20 收款地址，提现前核对完整钱包信息，并查看账户资金相关服务。\n\n<i>USDT 自动充值通道正在接入中，如需充值请联系客服。</i>")
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(premium_button("Wallet address management" if language == "en" else "钱包地址管理", callback_data="wallet_manage"))
+    kb.add(premium_button("Withdraw USDT" if language == "en" else "申请提现", callback_data="wallet_withdraw"))
+    kb.add(premium_button("Back to main menu" if language == "en" else "返回主菜单", callback_data="ui_buy"))
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_manage")
+def wallet_manage(call):
+    bot.answer_callback_query(call.id)
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
 
 def referral_reward_sync_loop():
     while True:
