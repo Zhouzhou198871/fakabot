@@ -112,6 +112,159 @@ NODE_PRODUCTS = [
 ]
 # ================================================
 
+
+REFERRAL_RATE = 0.05
+REFERRAL_PAGE_SIZE = 8
+WITHDRAW_MINIMUM = 10.0
+WITHDRAWALS_FILE = "/root/fakabot/withdrawals.json"
+ORDERS_FILE = "/root/fakabot/orders.json"
+
+def load_json_file(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            value = json.load(f)
+        return value
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+def save_json_file(path, value):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    temp = path + ".tmp"
+    with open(temp, "w", encoding="utf-8") as f:
+        json.dump(value, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temp, path)
+
+def bind_referrer(uid, start_payload):
+    """Bind an inviter once only. Existing bindings are never overwritten."""
+    if not str(start_payload or "").startswith("ref_"):
+        return False
+    inviter_id = str(start_payload)[4:].strip()
+    uid, inviter_id = str(uid), str(inviter_id)
+    if not inviter_id.isdigit() or inviter_id == uid:
+        return False
+    users = load_json_file(USERS_FILE, {})
+    if not isinstance(users, dict) or inviter_id not in users or uid not in users:
+        return False
+    current = users[uid].get("referred_by")
+    if current:
+        return False
+    users[uid]["referred_by"] = inviter_id
+    users[uid]["referred_at"] = time.time()
+    users[inviter_id].setdefault("referral_count", 0)
+    users[inviter_id]["referral_count"] = int(users[inviter_id]["referral_count"] or 0) + 1
+    save_json_file(USERS_FILE, users)
+    return True
+
+def _order_user_id(order):
+    return str(order.get("user_id") or order.get("telegram_id") or order.get("buyer_id") or "")
+
+def _order_is_paid(order):
+    return (
+        str(order.get("payment_status", "")).lower() in ("paid", "success", "completed", "confirmed")
+        or str(order.get("status", "")).lower() in ("paid", "success", "completed", "delivered")
+        or bool(order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at"))
+    )
+
+def _order_amount(order):
+    for key in ("amount", "price", "total", "paid_amount", "amount_usdt"):
+        try:
+            value = float(order.get(key))
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    try:
+        return int(order.get("amount_raw", 0)) / 1_000_000
+    except (TypeError, ValueError):
+        return 0.0
+
+def referral_spend_map():
+    orders = load_json_file(ORDERS_FILE, [])
+    totals = {}
+    if not isinstance(orders, list):
+        return totals
+    for order in orders:
+        if isinstance(order, dict) and _order_is_paid(order):
+            uid = _order_user_id(order)
+            totals[uid] = totals.get(uid, 0.0) + _order_amount(order)
+    return totals
+
+def sync_referral_rewards():
+    """Idempotently credit 5% for paid orders belonging to permanently bound invitees."""
+    users = load_json_file(USERS_FILE, {})
+    orders = load_json_file(ORDERS_FILE, [])
+    if not isinstance(users, dict) or not isinstance(orders, list):
+        return
+    changed = False
+    for order in orders:
+        if not isinstance(order, dict) or not _order_is_paid(order):
+            continue
+        buyer_id = _order_user_id(order)
+        buyer = users.get(buyer_id, {})
+        inviter_id = str(buyer.get("referred_by") or "")
+        if not inviter_id or inviter_id not in users:
+            continue
+        order_id = str(order.get("order_id") or order.get("id") or "")
+        if not order_id:
+            continue
+        inviter = users[inviter_id]
+        ledger = inviter.setdefault("referral_earnings", [])
+        if any(str(x.get("order_id")) == order_id for x in ledger if isinstance(x, dict)):
+            continue
+        amount = round(_order_amount(order) * REFERRAL_RATE, 6)
+        if amount <= 0:
+            continue
+        ledger.append({
+            "order_id": order_id, "invitee_id": buyer_id,
+            "spent": round(_order_amount(order), 6), "commission": amount,
+            "created_at": order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at") or time.time()
+        })
+        inviter["balance"] = round(float(inviter.get("balance", 0) or 0) + amount, 6)
+        inviter["invite_bonus"] = round(float(inviter.get("invite_bonus", 0) or 0) + amount, 6)
+        changed = True
+    if changed:
+        save_json_file(USERS_FILE, users)
+
+def format_local_time(value):
+    try:
+        if isinstance(value, (int, float)):
+            return time.strftime("%Y-%m-%d %H:%M", time.localtime(value))
+        return str(value).replace("T", " ")[:16]
+    except Exception:
+        return "—"
+
+def get_referral_page(uid, page=0):
+    users = load_json_file(USERS_FILE, {})
+    orders = load_json_file(ORDERS_FILE, [])
+    spend_map = referral_spend_map()
+    invitees = []
+    for invitee_id, info in users.items():
+        if str(info.get("referred_by") or "") == str(uid):
+            invitees.append((invitee_id, info))
+    invitees.sort(key=lambda pair: float(pair[1].get("referred_at") or pair[1].get("join_time") or 0), reverse=True)
+    total = len(invitees)
+    pages = max(1, (total + REFERRAL_PAGE_SIZE - 1) // REFERRAL_PAGE_SIZE)
+    page = max(0, min(int(page), pages - 1))
+    selected = invitees[page * REFERRAL_PAGE_SIZE:(page + 1) * REFERRAL_PAGE_SIZE]
+    return selected, total, pages, page, spend_map
+
+def get_invite_kb(page, pages, language="zh"):
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if language == "en":
+        kb.row(premium_button("Previous", callback_data=f"invite_page_{max(0, page-1)}"),
+               premium_button("Next", callback_data=f"invite_page_{min(pages-1, page+1)}"))
+        kb.row(premium_button("Withdraw rewards", callback_data="invite_withdraw"),
+               premium_button("Back to menu", callback_data="ui_buy"))
+    else:
+        kb.row(premium_button("上一页", callback_data=f"invite_page_{max(0, page-1)}"),
+               premium_button("下一页", callback_data=f"invite_page_{min(pages-1, page+1)}"))
+        kb.row(premium_button("申请提现", callback_data="invite_withdraw"),
+               premium_button("返回主菜单", callback_data="ui_buy"))
+    return kb
+
 def get_user(uid, name=""):
     if not os.path.exists(USERS_FILE):
         with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump({}, f)
@@ -237,6 +390,9 @@ def generate_main_text(user, uid):
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     user = get_user(message.from_user.id, message.from_user.first_name or "老板")
+    payload = (message.text or "").split(maxsplit=1)
+    if len(payload) > 1:
+        bind_referrer(message.from_user.id, payload[1])
     text = generate_main_text(user, message.from_user.id)
     bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=get_main_kb())
 
@@ -430,12 +586,147 @@ def show_help(call):
     text = "❓ <b>使用帮助</b>\n\n• 购买流程：选择分类 -> 选择商品 -> 支付 -> 自动发货。\n• 售后说明：虚拟商品售出概不退换，如有问题请点击【联系客服】。"
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
 
+def render_invite_page(chat_id, message_id, uid, page=0):
+    sync_referral_rewards()
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    selected, total, pages, page, spend_map = get_referral_page(uid, page)
+    balance = float(user.get("balance", 0) or 0)
+    earned = float(user.get("invite_bonus", 0) or 0)
+    bot_username = bot.get_me().username
+    invite_link = f"https://t.me/{bot_username}?start=ref_{uid}"
+    if language == "en":
+        lines = [
+            "🎁 <b>PERMANENT REFERRAL REWARDS</b>",
+            "<i>Your invitation is permanently linked. Earn rewards from every eligible purchase made by your invited friends.</i>",
+            "",
+            "💎 <b>Commission rate:</b> 5% of each paid order, credited to your reward balance.",
+            "🔒 <b>Permanent binding:</b> once linked, the relationship cannot be changed.",
+            "💳 <b>Use of rewards:</b> available for purchases or withdrawal.",
+            "🏦 <b>Withdrawal minimum:</b> 10 USDT. Requests are reviewed before payout.",
+            "",
+            f"👥 <b>Invited friends:</b> {total}",
+            f"💰 <b>Total rewards:</b> {earned:.2f} USDT",
+            f"💼 <b>Available balance:</b> {balance:.2f} USDT",
+            "",
+            "🔗 <b>Your personal invitation link</b>",
+            f"<code>{html.escape(invite_link)}</code>",
+            "",
+            f"📋 <b>Friend activity · Page {page+1}/{pages}</b>"
+        ]
+    else:
+        lines = [
+            "🎁 <b>永久邀请奖励计划</b>",
+            "<i>每位好友通过您的专属链接加入后，将永久绑定邀请关系。</i>",
+            "",
+            "💎 <b>永久返佣：</b>好友每笔成功消费，您可获得订单金额的 5%。",
+            "🔒 <b>永久绑定：</b>绑定成功后不可转移或重复绑定。",
+            "💳 <b>奖励用途：</b>可用于购买商城商品，也可申请提现。",
+            "🏦 <b>提现门槛：</b>累计可用余额达到 10 USDT 即可申请，申请后由人工审核处理。",
+            "",
+            f"👥 <b>累计邀请好友：</b>{total} 位",
+            f"💰 <b>累计邀请奖励：</b>{earned:.2f} USDT",
+            f"💼 <b>当前可用余额：</b>{balance:.2f} USDT",
+            "",
+            "🔗 <b>您的专属邀请链接</b>",
+            f"<code>{html.escape(invite_link)}</code>",
+            "",
+            f"📋 <b>好友消费明细 · 第 {page+1}/{pages} 页</b>"
+        ]
+    if selected:
+        for index, (invitee_id, info) in enumerate(selected, start=page * REFERRAL_PAGE_SIZE + 1):
+            joined = format_local_time(info.get("referred_at") or info.get("join_time"))
+            spent = spend_map.get(str(invitee_id), 0.0)
+            lines.append(f"\n<b>{index}.</b> ID <code>{invitee_id}</code>  ·  {joined}")
+            lines.append(f"   {('Total spend' if language == 'en' else '累计消费')}：<b>{spent:.2f} USDT</b>")
+    else:
+        lines.append("\n<i>No invited friends yet." if language == "en" else "\n<i>暂时还没有邀请记录，分享专属链接即可开始累计奖励。")
+        if language == "en":
+            lines[-1] += "</i>"
+        else:
+            lines[-1] += "</i>"
+    if language == "en":
+        lines.append("\n<i>Each friend is listed once. Spend totals include orders marked as successfully paid.</i>")
+    else:
+        lines.append("\n<i>每位好友仅展示一次；消费统计以系统确认成功的订单为准。</i>")
+    text = "\n".join(lines)
+    kb = get_invite_kb(page, pages, language)
+    safe_edit(bot, chat_id, message_id, text, kb)
+
 @bot.callback_query_handler(func=lambda call: call.data == "ui_invite")
 def show_invite(call):
-    bot_username = bot.get_me().username
-    invite_link = f"https://t.me/{bot_username}?start={call.from_user.id}"
-    text = f"🎁 <b>邀请奖励</b>\n\n邀请好友注册并使用本机器人，即可获得丰厚返佣。\n\n🔗 <b>您的专属链接：</b>\n<code>{invite_link}</code>"
-    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
+    bot.answer_callback_query(call.id)
+    render_invite_page(call.message.chat.id, call.message.message_id, call.from_user.id, 0)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("invite_page_"))
+def show_invite_page(call):
+    try:
+        page = int(call.data.rsplit("_", 1)[1])
+    except ValueError:
+        page = 0
+    bot.answer_callback_query(call.id)
+    render_invite_page(call.message.chat.id, call.message.message_id, call.from_user.id, page)
+
+@bot.callback_query_handler(func=lambda call: call.data == "invite_withdraw")
+def invite_withdraw(call):
+    bot.answer_callback_query(call.id)
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    balance = float(user.get("balance", 0) or 0)
+    if balance < WITHDRAW_MINIMUM:
+        msg = ("The minimum withdrawal is 10 USDT. Your available balance is "
+               f"{balance:.2f} USDT.") if language == "en" else (
+               f"提现门槛为 10 USDT，您当前可用余额为 {balance:.2f} USDT。达到门槛后即可申请。")
+        bot.send_message(call.message.chat.id, msg, reply_markup=get_back_kb())
+        return
+    prompt = ("Send the amount to withdraw (minimum 10 USDT), followed by your TRC20 USDT address on the next line."
+              if language == "en" else
+              "请按以下格式回复提现金额和 TRC20-USDT 收款地址：\n金额\nTRC20地址\n\n最低提现 10 USDT。")
+    sent = bot.send_message(call.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True))
+    bot.register_next_step_handler(sent, process_withdrawal_request)
+
+def process_withdrawal_request(message):
+    uid = str(message.from_user.id)
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    try:
+        parts = (message.text or "").strip().split()
+        amount = round(float(parts[0]), 6)
+        address = parts[1]
+        if amount < WITHDRAW_MINIMUM:
+            raise ValueError("minimum")
+        if not re.fullmatch(r"T[1-9A-HJ-NP-Za-km-z]{33}", address):
+            raise ValueError("address")
+    except Exception:
+        bot.reply_to(message, "格式无效。请重新点击「申请提现」，按“金额 + TRC20地址”填写。" if language == "zh" else
+                     "Invalid format. Please restart the withdrawal request and provide amount plus a TRC20 address.")
+        return
+    users = load_json_file(USERS_FILE, {})
+    current = users.get(uid, {})
+    balance = float(current.get("balance", 0) or 0)
+    if amount < WITHDRAW_MINIMUM or amount > balance:
+        bot.reply_to(message, f"余额不足或金额无效。当前可用余额：{balance:.2f} USDT。")
+        return
+    withdrawals = load_json_file(WITHDRAWALS_FILE, [])
+    request_id = f"WD{int(time.time())}{uid[-4:]}"
+    current["balance"] = round(balance - amount, 6)
+    current.setdefault("withdrawals", []).append(request_id)
+    users[uid] = current
+    withdrawals.append({
+        "request_id": request_id, "user_id": uid, "amount": amount,
+        "address": address, "status": "pending", "created_at": time.time()
+    })
+    save_json_file(USERS_FILE, users)
+    save_json_file(WITHDRAWALS_FILE, withdrawals)
+    bot.reply_to(message, f"提现申请已提交，编号：{request_id}\n金额：{amount:.2f} USDT\n状态：待人工审核。")
+    if ADMIN_ID.isdigit():
+        try:
+            bot.send_message(int(ADMIN_ID),
+                f"💸 <b>新提现申请</b>\n编号：<code>{request_id}</code>\n用户：<code>{uid}</code>\n金额：{amount:.2f} USDT\n地址：<code>{html.escape(address)}</code>",
+                parse_mode="HTML")
+        except Exception:
+            pass
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_recharge")
 def show_recharge(call):
