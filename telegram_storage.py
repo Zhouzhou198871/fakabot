@@ -153,26 +153,26 @@ class TelegramArchiveStore:
             time.sleep(max(1, int(interval)))
 
     def send_report_snapshot(self, report_text, report_title="工作汇报"):
-        """Publish a human-readable report together with the matching business-data JSON."""
+        """Publish a human-readable report with its matching snapshot, without holding the data lock during network I/O."""
         with self.lock:
             if not self.initialized:
                 raise RuntimeError("Telegram 归档存储尚未初始化")
-            snapshot = dict(self.data)
-            snapshot["updated_at"] = datetime.now(timezone.utc).isoformat()
-            encoded = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            buffer = io.BytesIO(encoded)
-            buffer.name = "qingtian_business_archive.json"
-            # Keep the complete report as a channel message; attach the exact data snapshot next to it.
-            self.bot.send_message(self.chat_id, report_text, parse_mode="HTML", disable_web_page_preview=True)
-            caption = (
-                "☀️ 晴天号铺 · " + str(report_title) + " · 配套业务数据文件\n"
-                f"用户：{len(snapshot.get('users', {}))} 条；订单：{len(snapshot.get('orders', []))} 条；"
-                f"提现：{len(snapshot.get('withdrawals', []))} 条\n"
-                "本附件为发送该汇报时的业务数据快照，请勿转发。"
-            )
-            self.bot.send_document(
-                self.chat_id, buffer, caption=caption, disable_notification=True
-            )
+            snapshot = copy.deepcopy(self.data)
+        snapshot["updated_at"] = datetime.now(timezone.utc).isoformat()
+        encoded = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        buffer = io.BytesIO(encoded)
+        buffer.name = "qingtian_business_archive.json"
+        # Keep the complete report as a channel message; attach the exact data snapshot next to it.
+        self.bot.send_message(self.chat_id, report_text, parse_mode="HTML", disable_web_page_preview=True)
+        caption = (
+            "☀️ 晴天号铺 · " + str(report_title) + " · 配套业务数据文件\n"
+            f"用户：{len(snapshot.get('users', {}))} 条；订单：{len(snapshot.get('orders', []))} 条；"
+            f"提现：{len(snapshot.get('withdrawals', []))} 条\n"
+            "本附件为发送该汇报时的业务数据快照，请勿转发。"
+        )
+        self.bot.send_document(
+            self.chat_id, buffer, caption=caption, disable_notification=True
+        )
 
     def _persist(self, reason):
         with self.lock:
