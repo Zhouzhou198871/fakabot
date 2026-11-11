@@ -1,0 +1,27 @@
+name: Validate Telegram bot
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile bot modules
+        run: python -m py_compile bot.py payment_listener.py
+      - name: Check global two-column keyboard enforcement
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("bot.py").read_text(encoding="utf-8")
+          assert "def enforce_two_column_keyboard(kb):" in source
+          assert "buttons[index:index + 2]" in source
+          assert "kwargs[\"reply_markup\"] = enforce_two_column_keyboard" in source
+          assert "bot.edit_message_text = _edit_message_text_two_columns" in source
+          print("Global two-column keyboard enforcement is wired.")
+          PY
