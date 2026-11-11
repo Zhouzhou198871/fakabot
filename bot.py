@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import telebot, time, json, os
+import telebot, time, json, os, re, html
 from telebot import types
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -15,6 +15,52 @@ EMOJI = {
     "apple": "5001358570013329603", "ai": "6289722534019475465", "video": "5001404418789214347",
     "node": "6244694135542913498"
 }
+
+
+def premium_emoji(key, fallback="⭐"):
+    """Telegram Premium custom emoji HTML entity."""
+    emoji_id = EMOJI.get(key)
+    if not emoji_id:
+        return fallback
+    return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+
+def clean_button_text(value):
+    """按钮标题只保留文字；会员表情由 icon_custom_emoji_id 显示。"""
+    value = str(value)
+    value = re.sub(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D\u20E3]+', '', value)
+    return re.sub(r'\s+', ' ', value).strip()
+
+def premium_button(text, **kwargs):
+    """统一给所有内联按钮配置 Telegram Premium 自定义表情图标。"""
+    label = clean_button_text(text)
+    probe = (label + " " + str(kwargs.get("callback_data", ""))).lower()
+    if any(x in probe for x in ("充值", "支付", "usdt", "pay_")):
+        key = "usdt"
+    elif any(x in probe for x in ("苹果", "apple", "list_apple")):
+        key = "apple"
+    elif any(x in probe for x in ("tg账号", "telegram", "list_tg")):
+        key = "tg"
+    elif any(x in probe for x in ("ai", "claude", "chatgpt")):
+        key = "ai"
+    elif any(x in probe for x in ("影音", "视频", "游戏")):
+        key = "video"
+    elif any(x in probe for x in ("节点", "node")):
+        key = "node"
+    elif any(x in probe for x in ("邀请", "奖励")):
+        key = "gift"
+    elif any(x in probe for x in ("客服", "帮助", "返回", "更多")):
+        key = "gear"
+    elif any(x in probe for x in ("商城", "账号铺", "商品")):
+        key = "diamond"
+    elif any(x in probe for x in ("订单", "记录")):
+        key = "star"
+    else:
+        key = "star"
+    return types.InlineKeyboardButton(
+        text=label or "打开",
+        icon_custom_emoji_id=EMOJI[key],
+        **kwargs
+    )
 
 # ================= 完整真实数据区 =================
 APPLE_PRODUCTS = [
@@ -84,39 +130,39 @@ def get_main_kb():
     """主界面：账号与节点合并为账号商城，严格两列三行。"""
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
-        types.InlineKeyboardButton("账号商城", callback_data="cat_account"),
-        types.InlineKeyboardButton("历史订单", callback_data="ui_orders")
+        premium_button("账号商城", callback_data="cat_account"),
+        premium_button("历史订单", callback_data="ui_orders")
     )
     kb.row(
-        types.InlineKeyboardButton("邀请奖励", callback_data="ui_invite"),
-        types.InlineKeyboardButton("充值", callback_data="ui_recharge")
+        premium_button("邀请奖励", callback_data="ui_invite"),
+        premium_button("充值", callback_data="ui_recharge")
     )
     kb.row(
-        types.InlineKeyboardButton("使用帮助", callback_data="ui_help"),
-        types.InlineKeyboardButton("更多服务", callback_data="more_services")
+        premium_button("使用帮助", callback_data="ui_help"),
+        premium_button("更多服务", callback_data="more_services")
     )
     return kb
 def get_more_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
-        types.InlineKeyboardButton("📢 节点交流群", url="https://t.me/qingtian_vip"),
-        types.InlineKeyboardButton("📢 代理频道", url="https://t.me/jiedian888")
+        premium_button("📢 节点交流群", url="https://t.me/qingtian_vip"),
+        premium_button("📢 代理频道", url="https://t.me/jiedian888")
     )
     kb.row(
-        types.InlineKeyboardButton("📢 账号铺频道", url="https://t.me/qingtian_tutorial"),
-        types.InlineKeyboardButton("💬 联系客服", callback_data="show_support")
+        premium_button("📢 账号铺频道", url="https://t.me/qingtian_tutorial"),
+        premium_button("💬 联系客服", callback_data="show_support")
     )
     kb.row(
-        types.InlineKeyboardButton("🔙 返回", callback_data="ui_buy"),
-        types.InlineKeyboardButton("☀️ 晴天", callback_data="ui_buy")
+        premium_button("🔙 返回", callback_data="ui_buy"),
+        premium_button("☀️ 晴天", callback_data="ui_buy")
     )
     return kb
 
 def get_account_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("苹果ID", callback_data="list_apple"), types.InlineKeyboardButton("TG账号", callback_data="list_tg"))
-    kb.add(types.InlineKeyboardButton("AI 专区", callback_data="list_ai"), types.InlineKeyboardButton("影音游戏", callback_data="list_video"))
-    kb.add(types.InlineKeyboardButton("🔙 返回主菜单", callback_data="ui_buy"))
+    kb.add(premium_button("苹果ID", callback_data="list_apple"), premium_button("TG账号", callback_data="list_tg"))
+    kb.add(premium_button("AI 专区", callback_data="list_ai"), premium_button("影音游戏", callback_data="list_video"))
+    kb.add(premium_button("🔙 返回主菜单", callback_data="ui_buy"))
     return kb
 
 def get_products_kb(cat_id):
@@ -127,29 +173,43 @@ def get_products_kb(cat_id):
     elif cat_id == "node": products = NODE_PRODUCTS
     else: products = [{"id": "0", "name": "暂无商品", "price": "0"}]
     for p in products:
-        btn = types.InlineKeyboardButton(f"{p['name']} | {p['price']} U", callback_data=f"buy_{p['id']}")
+        btn = premium_button(f"{p['name']} | {p['price']} U", callback_data=f"buy_{p['id']}")
         kb.add(btn)
     back_btn = "cat_account" if cat_id in ["apple", "tg", "ai", "video"] else "ui_buy"
-    kb.add(types.InlineKeyboardButton("🔙 返回上一级", callback_data=back_btn))
+    kb.add(premium_button("🔙 返回上一级", callback_data=back_btn))
     return kb
 
 def get_back_kb():
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🔙 返回主菜单", callback_data="ui_buy"))
+    kb.add(premium_button("🔙 返回主菜单", callback_data="ui_buy"))
     return kb
 
 def generate_main_text(user, uid):
-    """主界面正文统一使用 Telegram Custom Emoji 实体，不混用普通 Emoji。"""
+    """丰富的主菜单欢迎页：正文使用 Premium 自定义表情实体。"""
+    first_name = html.escape(str(user.get("name") or "老板"))
+    balance = float(user.get("balance", 0) or 0)
+    orders = int(user.get("orders_count", 0) or 0)
+    invited = int(user.get("invited_count", 0) or 0)
+    bonus = float(user.get("invite_bonus", 0) or 0)
     return (
-        f'✨ <b>欢迎光临晴天号铺。</b>\n\n'
-        f'📌 <b>您的专属账户信息</b>\n'
-        f' ├ 🆔 <b>用户 ID：</b> <code>{uid}</code>\n'
-        f' ├ 💰 <b>账户余额：</b> <b>{user["balance"]:.2f}</b> USDT\n'
-        f' ├ 🛒 <b>订单记录：</b> {user.get("orders_count", 0)} 单\n'
-        f' ├ 👥 <b>邀请用户：</b> {user.get("invited_count", 0)} 位\n'
-        f' └ 🎁 <b>邀请奖励：</b> 累计 {user.get("invite_bonus", 0.0):.2f} USDT\n\n'
-        f'━━━━━━━━━━━━━━━━\n'
-        f'🛒 <b>自助选购</b>：点击下方按钮即可挑选。'
+        f'{premium_emoji("star", "✨")} <b>欢迎来到晴天号铺，{first_name}！</b>\n'
+        f'<i>一站式数字商品自助商城 · 选购方便 · 操作简单</i>\n\n'
+        f'{premium_emoji("diamond", "💎")} <b>您的账户</b>\n'
+        f'├ 用户 ID：<code>{uid}</code>\n'
+        f'├ 账户余额：<b>{balance:.2f} USDT</b>\n'
+        f'├ 累计订单：<b>{orders}</b> 单\n'
+        f'├ 邀请好友：<b>{invited}</b> 位\n'
+        f'└ 邀请奖励：<b>{bonus:.2f} USDT</b>\n\n'
+        f'━━━━━━━━━━━━━━━━━━\n'
+        f'{premium_emoji("gift", "🎁")} <b>商城精选</b>\n'
+        f'苹果账号 · Telegram 账号 · AI 服务 · 影音游戏\n\n'
+        f'{premium_emoji("node", "🌐")} <b>简单三步，轻松购买</b>\n'
+        f'① 进入账号商城，选择需要的商品\n'
+        f'② 查看商品详情，确认规格与价格\n'
+        f'③ 按页面提示完成支付，留意订单与发货消息\n\n'
+        f'{premium_emoji("gear", "🛟")} <b>需要帮助？</b>\n'
+        f'点击「使用帮助」查看说明，或进入「更多服务」联系官方客服。\n\n'
+        f'<b>请选择下方菜单，开始选购吧：</b>'
     )
 
 @bot.message_handler(commands=['start'])
@@ -177,8 +237,8 @@ def show_support(call):
     text = "如果在购买或使用过程中遇到任何问题，请点击下方按钮联系人工客服。\n\n⏰ <b>客服在线时间：</b> 09:00 - 24:00"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(
-        types.InlineKeyboardButton("👨‍💻 主客服 @qingtian_Boss", url="https://t.me/qingtian_Boss"),
-        types.InlineKeyboardButton("🔙 返回", callback_data="more_services")
+        premium_button("👨‍💻 主客服 @qingtian_Boss", url="https://t.me/qingtian_Boss"),
+        premium_button("🔙 返回", callback_data="more_services")
     )
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
@@ -232,8 +292,8 @@ def buy_item(call):
 
     back_cb = "list_apple" if prod_id.startswith("a") else ("list_tg" if prod_id.startswith("t") else ("list_ai" if prod_id.startswith("ai") else "cat_node"))
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(types.InlineKeyboardButton("💳 在线支付", callback_data=f"pay_{prod_id}"), types.InlineKeyboardButton("💬 联系客服", url="https://t.me/qingtian_Boss"))
-    kb.add(types.InlineKeyboardButton("🔙 返回列表", callback_data=back_cb))
+    kb.add(premium_button("💳 在线支付", callback_data=f"pay_{prod_id}"), premium_button("💬 联系客服", url="https://t.me/qingtian_Boss"))
+    kb.add(premium_button("🔙 返回列表", callback_data=back_cb))
     safe_edit(bot, call.message.chat.id, call.message.message_id, detail, kb)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
