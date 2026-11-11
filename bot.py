@@ -1102,6 +1102,10 @@ def referral_reward_sync_loop():
 
 
 def daily_report_text(report_date):
+    try:
+        report_tz = ZoneInfo(os.getenv("REPORT_TIMEZONE", "Asia/Shanghai"))
+    except Exception:
+        report_tz = ZoneInfo("UTC")
     users = load_json_file(USERS_FILE, {})
     orders = load_json_file(ORDERS_FILE, [])
     withdrawals = load_json_file(WITHDRAWALS_FILE, [])
@@ -1109,7 +1113,7 @@ def daily_report_text(report_date):
     for user in users.values():
         try:
             joined = user.get("join_time")
-            if joined and datetime.fromtimestamp(float(joined)).date().isoformat() == report_date:
+            if joined and datetime.fromtimestamp(float(joined), tz=report_tz).date().isoformat() == report_date:
                 today_users += 1
         except (TypeError, ValueError, OSError):
             continue
@@ -1118,7 +1122,7 @@ def daily_report_text(report_date):
     for order in paid_orders:
         stamp = order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at")
         try:
-            paid_date = datetime.fromtimestamp(float(stamp)).date().isoformat() if isinstance(stamp, (int, float)) else str(stamp)[:10]
+            paid_date = datetime.fromtimestamp(float(stamp), tz=report_tz).date().isoformat() if isinstance(stamp, (int, float)) else str(stamp)[:10]
         except (TypeError, ValueError, OSError):
             paid_date = ""
         if paid_date == report_date:
