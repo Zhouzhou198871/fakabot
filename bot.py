@@ -133,6 +133,36 @@ TG_PRODUCTS = [
     {"id": "t5", "name": "✈️ 越南 +84 成品号", "price": "4.0"}
 ]
 
+INSTAGRAM_PRODUCTS = [
+    {"id": "ig1971", "name": "Instagram账号｜注册10-12个月｜已设置2FA", "price": "2.49"},
+    {"id": "ig2230", "name": "Instagram账号｜注册1-7天｜已设置2FA｜包含cookie｜优质账号", "price": "0.50"},
+    {"id": "ig1481", "name": "Instagram账号｜注册1-7天｜2FA登录｜包含cookie", "price": "0.56"},
+    {"id": "ig7181", "name": "Instagram账号｜已通过手机号验证｜已设置2FA｜无邮箱", "price": "1.21"},
+    {"id": "ig8125", "name": "Instagram账号｜注册1-3个月｜已设置2FA｜真机注册｜高质量｜2FA轻松登录", "price": "1.25"},
+    {"id": "ig3163", "name": "Instagram账号｜firstmail邮箱可用｜已设置2FA", "price": "1.50"},
+    {"id": "ig7169", "name": "Instagram账号｜印度尼西亚｜已通过手机号验证｜已设置2FA｜无邮箱", "price": "1.50"},
+    {"id": "ig7170", "name": "Instagram账号｜印度｜已通过手机号验证｜已设置2FA｜无邮箱", "price": "1.50"},
+    {"id": "ig3732", "name": "Threads账号｜手机已验证｜无邮箱｜已设置2FA｜首登时需自行激活Threads", "price": "1.71"},
+    {"id": "ig1624", "name": "Instagram账号｜注册6-10个月｜2FA登录｜高质量", "price": "1.74"},
+    {"id": "ig6145", "name": "Threads账号｜@firstmail.ltd邮箱可用｜已设置2FA", "price": "2.41"},
+    {"id": "ig5545", "name": "Instagram账号｜注册90天+｜邮箱无效｜已设置2FA", "price": "3.00"},
+    {"id": "ig3067", "name": "Instagram账号｜注册6个月｜粉丝10+｜firstmail邮箱可用｜已设置2FA", "price": "3.00"},
+    {"id": "ig3065", "name": "Instagram账号｜帖子1-10篇｜firstmail邮箱可用｜已设置2FA", "price": "3.21"},
+    {"id": "ig1468", "name": "Instagram账号｜2025年老号｜注册1年+｜Firstmail邮箱可用｜高质量账户｜已设置2FA", "price": "3.73"},
+    {"id": "ig6195", "name": "Instagram账号｜帖子10-20篇｜firstmail邮箱可用｜已设置2FA", "price": "3.83"},
+    {"id": "ig6151", "name": "Instagram账号｜帖子20-30篇｜@firstmail邮箱可用｜已设置2FA", "price": "4.46"},
+    {"id": "ig6207", "name": "Instagram账号｜2024-2025年｜firstmail邮箱可用｜邮箱接码登录", "price": "4.50"},
+    {"id": "ig1912", "name": "Instagram账号｜2024年注册｜已设置2FA｜包含cookie", "price": "5.50"},
+    {"id": "ig7326", "name": "Instagram账号｜2015-2023年老号｜头像随机｜包含cookie｜已设置2FA｜精品老号", "price": "7.10"},
+    {"id": "ig2357", "name": "Threads账号｜注册2个月+｜手机已验证｜无邮箱｜已设置2FA", "price": "7.21"},
+    {"id": "ig5543", "name": "Threads账号｜注册90天+｜随机地区｜手机已验证｜无邮箱｜已设置2FA｜首登时需自行激活Threads", "price": "8.99"},
+    {"id": "ig2358", "name": "Threads账号｜注册6个月+｜手机已验证｜无邮箱｜已设置2FA", "price": "11.99"},
+    {"id": "ig5319", "name": "Instagram账号｜2025-2026年注册｜包含头像｜帖子20-100｜粉丝0-30｜已设置2FA", "price": "12.43"},
+    {"id": "ig1914", "name": "Instagram账号｜2015-2024年注册｜帖子5-100｜已设置2FA｜包含cookie", "price": "12.49"},
+    {"id": "ig2094", "name": "Instagram账号｜2015-2024年注册｜粉丝100+｜帖子0-4｜已设置2FA｜包含cookie", "price": "12.49"},
+    {"id": "ig2093", "name": "Instagram账号｜2015-2024年注册｜粉丝100+｜帖子5-100｜已设置2FA｜包含cookie", "price": "20.61"},
+]
+
 AI_PRODUCTS = [
     {"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"}
 ]
@@ -596,6 +626,7 @@ def get_product_catalog(cat_id):
     catalogs = {
         "apple": APPLE_PRODUCTS,
         "tg": TG_PRODUCTS,
+        "instagram": INSTAGRAM_PRODUCTS,
         "ai": AI_PRODUCTS,
         "node": NODE_PRODUCTS,
     }
@@ -616,6 +647,7 @@ def get_product_page_text(cat_id, page=0):
     titles = {
         "apple": ("🍎", "苹果 ID 专区", "覆盖不同地区、账号年限及使用需求。请先阅读商品名称和适用说明，再选择对应商品。"),
         "tg": ("✈️", "TG 账号专区", "提供不同国家区号的 Telegram 账号。购买前请核对国家区号及账号用途。"),
+        "instagram": ("📸", "Instagram / Threads 账号专区", "Instagram（IG/INS）及 Threads 商品目录。请根据商品名称和登录配置选择。"),
         "ai": ("🤖", "AI 账号专区", "汇集 AI 工具账号选项。请根据服务类型和使用需求选择。"),
         "social": ("👥", "社交账号专区", "选择需要的社交平台账号类别。"),
         "email": ("✉️", "邮箱账号专区", "选择需要的邮箱服务类别。"),
@@ -627,7 +659,7 @@ def get_product_page_text(cat_id, page=0):
     icon, title, intro = titles.get(cat_id, ("🛍️", "商品专区", "请选择适合您的商品。"))
     first = page * 8 + 1 if total else 0
     last = min((page + 1) * 8, total)
-    item_label = "商品" if cat_id in ("apple", "tg", "ai", "node") else "品牌入口"
+    item_label = "商品" if cat_id in ("apple", "tg", "instagram", "ai", "node") else "品牌入口"
     return (
         f"{icon} <b>{title}</b>\n"
         f"📦 {item_label}数量：<b>{total} 种</b>\n"
@@ -647,7 +679,7 @@ def get_products_kb(cat_id, page=0):
     # 九大类统一为单列：每个商品/品牌入口独占一行，点击整行直接进入对应流程。
     kb = types.InlineKeyboardMarkup(row_width=1)
     product_icons = {
-        "apple": "🍎", "tg": "✈️", "ai": "🤖", "social": "👥",
+        "apple": "🍎", "tg": "✈️", "instagram": "📸", "ai": "🤖", "social": "👥",
         "email": "✉️", "video": "🎬", "communication": "💬",
         "commerce": "🛒", "node": "🌐"
     }
@@ -902,6 +934,9 @@ def show_brand_notice(call):
     except (IndexError, ValueError):
         bot.answer_callback_query(call.id, "品牌入口无效，请返回重试。", show_alert=True)
         return
+    if group_id == "social" and brand_name == "Instagram":
+        safe_edit(bot, call.message.chat.id, call.message.message_id, get_product_page_text("instagram", 0), get_products_kb("instagram", 0))
+        return
     text = f"🏷️ <b>{html.escape(brand_name)}</b>\n\n该品牌商品正在整理上架。请联系客服确认可售商品、库存及价格。"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(premium_button("联系客服", url="https://t.me/qingtian_Boss"), premium_button("返回品牌分类", callback_data=f"brands_{group_id}"))
@@ -935,7 +970,7 @@ def show_product_page(call):
         page = int(parts[2])
     except ValueError:
         page = 0
-    if cat_id not in ("apple", "tg", "ai", "social", "email", "video", "communication", "commerce", "node"):
+    if cat_id not in ("apple", "tg", "instagram", "ai", "social", "email", "video", "communication", "commerce", "node"):
         bot.answer_callback_query(call.id, "商品分类不存在。", show_alert=True)
         return
     safe_edit(
@@ -952,7 +987,7 @@ def buy_item(call):
         return_page = max(0, int(parts[2])) if len(parts) > 2 else 0
     except ValueError:
         return_page = 0
-    all_products = APPLE_PRODUCTS + TG_PRODUCTS + AI_PRODUCTS + NODE_PRODUCTS
+    all_products = APPLE_PRODUCTS + TG_PRODUCTS + INSTAGRAM_PRODUCTS + AI_PRODUCTS + NODE_PRODUCTS
     p = next((x for x in all_products if x["id"] == prod_id), None)
     if not p:
         bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
@@ -961,6 +996,13 @@ def buy_item(call):
 
     if prod_id.startswith("ai"):
         detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
+    elif prod_id.startswith("ig"):
+        detail = (
+            f"📸 <b>商品详情：{p['name']}</b>\\n"
+            f"💰 <b>售价：</b> <code>{p['price']} U</code>\\n\\n"
+            "购买前请核对商品规格、账号使用权限及平台规则。\\n\\n"
+            "👇 <i>请通过下方支付入口继续</i>"
+        )
     elif prod_id.startswith("a"):
         detail = (
             f"🛍 <b>商品详情：{p['name']}</b>\n"
@@ -978,7 +1020,7 @@ def buy_item(call):
     else:
         detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
 
-    back_cat = "ai" if prod_id.startswith("ai") else ("apple" if prod_id.startswith("a") else ("tg" if prod_id.startswith("t") else "node"))
+    back_cat = "ai" if prod_id.startswith("ai") else ("instagram" if prod_id.startswith("ig") else ("apple" if prod_id.startswith("a") else ("tg" if prod_id.startswith("t") else "node")))
     back_cb = f"products_{back_cat}_{return_page}"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button("💳 在线支付", callback_data=f"pay_{prod_id}"), premium_button("💬 联系客服", url="https://t.me/qingtian_Boss"))
