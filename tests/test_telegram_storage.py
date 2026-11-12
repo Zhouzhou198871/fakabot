@@ -103,7 +103,7 @@ class TelegramArchiveStoreTests(unittest.TestCase):
         self.assertTrue(store.flush())
         recovered = TelegramArchiveStore(bot, -1004459109788)
         recovered.initialize()
-        self.assertEqual(recovered.load("users", {}), {"123": {"balance": 99}))
+        self.assertEqual(recovered.load("users", {}), {"123": {"balance": 99}})
 
 
     def test_meta_dictionary_can_be_saved_and_recovered(self):
