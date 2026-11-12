@@ -375,24 +375,28 @@ def set_user_language(uid, language):
     save_json_file(USERS_FILE, users)
 
 def enforce_two_column_keyboard(kb):
-    """Normalize every inline keyboard to two buttons per row; pad odd counts with a main-menu action."""
+    """Arrange inline buttons in two columns without duplicating an existing final back button."""
     if kb is None or not getattr(kb, "keyboard", None):
         return kb
     buttons = [button for row in kb.keyboard for button in row]
     if not buttons:
         return kb
     if len(buttons) % 2:
-        try:
-            back_button = types.InlineKeyboardButton(
-                text="返回主菜单",
-                callback_data="ui_buy",
-                icon_custom_emoji_id=EMOJI.get("gear")
-            )
-        except TypeError:
-            back_button = types.InlineKeyboardButton(
-                text="返回主菜单", callback_data="ui_buy"
-            )
-        buttons.append(back_button)
+        last_button = buttons[-1]
+        last_text = str(getattr(last_button, "text", "") or "").lower()
+        is_existing_back = ("返回" in last_text or "back" in last_text)
+        if not is_existing_back:
+            try:
+                back_button = types.InlineKeyboardButton(
+                    text="返回主菜单",
+                    callback_data="ui_buy",
+                    icon_custom_emoji_id=EMOJI.get("gear")
+                )
+            except TypeError:
+                back_button = types.InlineKeyboardButton(
+                    text="返回主菜单", callback_data="ui_buy"
+                )
+            buttons.append(back_button)
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     # pyTelegramBotAPI exposes keyboard as a read-only property; mutate its list in place.
     kb.keyboard[:] = rows
@@ -755,7 +759,15 @@ def show_support(call):
 @bot.callback_query_handler(func=lambda call: call.data == "cat_account")
 def show_account_menu(call):
     bot.answer_callback_query(call.id)
-    safe_edit(bot, call.message.chat.id, call.message.message_id, "🛍 <b>账号铺</b>\n👇 <i>请选择：</i>", get_account_kb())
+    account_shop_text = (
+        "🛒 <b>账号专属商城</b>\n\n"
+        "🏆 <b>源头直供，全网底价</b>\n"
+        "✨ 专注提供全球优质账号，全部现货秒发。\n"
+        "🛡️ <b>安全保障</b>：售后质保，提供详细操作指南。\n"
+        "⚡ <b>自动发货</b>：24小时无人值守，即买即用。\n\n"
+        "👇 请选择您需要的账号类型："
+    )
+    safe_edit(bot, call.message.chat.id, call.message.message_id, account_shop_text, get_account_kb())
 
 @bot.callback_query_handler(func=lambda call: call.data == "cat_node")
 def show_node_menu(call):
