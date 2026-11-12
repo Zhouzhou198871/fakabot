@@ -552,11 +552,31 @@ def get_more_kb(language="zh"):
         )
     return kb
 
+# Brand groups are navigation categories; sale items/prices are added only after stock is supplied.
+BRAND_GROUPS = {
+    "social": {"title": "社交账号", "brands": [("TikTok", "🎵"), ("Facebook", "📘"), ("Instagram", "📸"), ("Twitter / X", "𝕏"), ("Discord", "🎮")]},
+    "email": {"title": "邮箱账号", "brands": [("Google 邮箱", "✉️"), ("微软邮箱", "🪟"), ("Yahoo 邮箱", "💜"), ("Mail.ru 邮箱", "📨")]},
+    "video": {"title": "视频账号", "brands": [("YouTube", "▶️")]},
+    "communication": {"title": "通讯账号", "brands": [("Teams", "👥"), ("WhatsApp", "💬"), ("LINE", "🟢"), ("TextNow", "📱")]},
+    "commerce": {"title": "电商账号", "brands": [("Amazon", "📦"), ("Walmart", "🏬")]},
+}
+
 def get_account_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(premium_button("苹果ID", callback_data="list_apple"), premium_button("TG账号", callback_data="list_tg"))
-    kb.add(premium_button("AI 专区", callback_data="list_ai"), premium_button("影音游戏", callback_data="list_video"))
-    kb.add(premium_button("🔙 返回主菜单", callback_data="ui_buy"))
+    kb.row(premium_button("苹果 ID", callback_data="list_apple"), premium_button("TG 账号", callback_data="list_tg"))
+    kb.row(premium_button("AI 专区", callback_data="list_ai"), premium_button("社交账号", callback_data="brands_social"))
+    kb.row(premium_button("邮箱账号", callback_data="brands_email"), premium_button("视频账号", callback_data="brands_video"))
+    kb.row(premium_button("通讯账号", callback_data="brands_communication"), premium_button("电商账号", callback_data="brands_commerce"))
+    kb.row(premium_button("节点套餐", callback_data="list_node"), premium_button("返回主菜单", callback_data="ui_buy"))
+    return kb
+
+def get_brand_group_kb(group_id):
+    group = BRAND_GROUPS[group_id]
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    for brand_name, brand_emoji in group["brands"]:
+        # Brand-specific Premium emoji IDs are intentionally not fabricated.
+        kb.add(premium_button(f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{len(kb.keyboard)}"))
+    kb.row(premium_button("返回账号商城", callback_data="cat_account"))
     return kb
 
 def get_products_kb(cat_id):
@@ -565,12 +585,14 @@ def get_products_kb(cat_id):
     elif cat_id == "tg": products = TG_PRODUCTS
     elif cat_id == "ai": products = AI_PRODUCTS
     elif cat_id == "node": products = NODE_PRODUCTS
-    else: products = [{"id": "0", "name": "暂无商品", "price": "0"}]
+    else: products = []
     for p in products:
         btn = premium_button(f"{p['name']} | {p['price']} U", callback_data=f"buy_{p['id']}")
         kb.add(btn)
+    if not products:
+        kb.add(premium_button("商品整理上架中", callback_data="show_support"))
     back_btn = "cat_account" if cat_id in ["apple", "tg", "ai", "video"] else "ui_buy"
-    kb.add(premium_button("🔙 返回上一级", callback_data=back_btn))
+    kb.add(premium_button("返回上一级", callback_data=back_btn))
     return kb
 
 def get_back_kb():
@@ -774,10 +796,39 @@ def show_node_menu(call):
     bot.answer_callback_query(call.id)
     safe_edit(bot, call.message.chat.id, call.message.message_id, "🚀 <b>节点铺</b>\n👇 <i>请选择：</i>", get_products_kb("node"))
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("brands_"))
+def show_brand_group(call):
+    bot.answer_callback_query(call.id)
+    group_id = call.data.replace("brands_", "", 1)
+    group = BRAND_GROUPS.get(group_id)
+    if not group:
+        bot.answer_callback_query(call.id, "分类不存在", show_alert=True)
+        return
+    text = f"🏷️ <b>{group['title']}</b>\n\n请选择品牌。具体商品、库存和售价以实际上架信息为准。"
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_brand_group_kb(group_id))
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("brand_"))
+def show_brand_notice(call):
+    bot.answer_callback_query(call.id)
+    parts = call.data.split("_")
+    group_id = parts[1] if len(parts) > 1 else ""
+    group = BRAND_GROUPS.get(group_id)
+    if not group:
+        return
+    text = f"🏷️ <b>{group['title']}</b>\n\n该品牌商品正在整理上架。请联系客服确认可售商品、库存及价格。"
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.row(premium_button("联系客服", url="https://t.me/qingtian_Boss"), premium_button("返回品牌分类", callback_data=f"brands_{group_id}"))
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("list_"))
 def show_category_list(call):
+    bot.answer_callback_query(call.id)
     cat_id = call.data.replace("list_", "")
-    titles = {"apple": "🍎 <b>苹果ID 专区</b>", "tg": "✈️ <b>TG账号 专区</b>", "ai": "🤖 <b>AI 专区</b>", "video": "🎬 <b>影音游戏</b>"}
+    titles = {"apple": "🍎 <b>苹果ID 专区</b>", "tg": "✈️ <b>TG账号 专区</b>", "ai": "🤖 <b>AI 专区</b>", "video": "🎬 <b>视频账号</b>", "node": "🌐 <b>节点套餐</b>"}
+    if cat_id == "video":
+        group = BRAND_GROUPS["video"]
+        safe_edit(bot, call.message.chat.id, call.message.message_id, f"🎬 <b>{group['title']}</b>\n\n请选择品牌。", get_brand_group_kb("video"))
+        return
     safe_edit(bot, call.message.chat.id, call.message.message_id, f"{titles.get(cat_id, '商品列表')}\n👇 <i>请选择：</i>", get_products_kb(cat_id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
