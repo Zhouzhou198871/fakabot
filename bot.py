@@ -601,6 +601,12 @@ def get_product_catalog(cat_id):
         "ai": AI_PRODUCTS,
         "node": NODE_PRODUCTS,
     }
+    # 其余五大类目前展示已配置的品牌入口，不伪造商品、库存或价格。
+    if cat_id in BRAND_GROUPS:
+        return [
+            {"id": f"{cat_id}_{i}", "name": name, "brand_index": i}
+            for i, (name, _emoji) in enumerate(BRAND_GROUPS[cat_id]["brands"])
+        ]
     return catalogs.get(cat_id, [])
 
 
@@ -613,18 +619,24 @@ def get_product_page_text(cat_id, page=0):
         "apple": ("🍎", "苹果 ID 专区", "覆盖不同地区、账号年限及使用需求。请先阅读商品名称和适用说明，再选择对应商品。"),
         "tg": ("✈️", "TG 账号专区", "提供不同国家区号的 Telegram 账号。购买前请核对国家区号及账号用途。"),
         "ai": ("🤖", "AI 账号专区", "汇集 AI 工具账号选项。请根据服务类型和使用需求选择。"),
+        "social": ("👥", "社交账号专区", "选择需要的社交平台账号类别。"),
+        "email": ("✉️", "邮箱账号专区", "选择需要的邮箱服务类别。"),
+        "video": ("🎬", "视频账号专区", "选择需要的视频平台账号类别。"),
+        "communication": ("💬", "通讯账号专区", "选择需要的通讯平台账号类别。"),
+        "commerce": ("🛒", "电商账号专区", "选择需要的电商平台账号类别。"),
         "node": ("🌐", "节点套餐专区", "按流量和使用需求选择套餐；购买前请确认套餐规格。"),
     }
     icon, title, intro = titles.get(cat_id, ("🛍️", "商品专区", "请选择适合您的商品。"))
     first = page * 8 + 1 if total else 0
     last = min((page + 1) * 8, total)
+    item_label = "商品" if cat_id in ("apple", "tg", "ai", "node") else "品牌入口"
     return (
         f"{icon} <b>{title}</b>\n"
-        f"📦 商品数量：<b>{total} 种</b>\n"
+        f"📦 {item_label}数量：<b>{total} 种</b>\n"
         f"📄 当前页：<b>{page + 1}/{pages}</b> · 显示第 <b>{first}-{last}</b> 项\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"{intro}\n\n"
-        "👇 <b>请选择下方商品查看详情与价格：</b>"
+        "👇 <b>请选择下方项目：</b>"
     )
 
 
@@ -634,27 +646,36 @@ def get_products_kb(cat_id, page=0):
     pages = max(1, (total + 7) // 8)
     page = max(0, min(int(page), pages - 1))
     selected = products[page * 8:(page + 1) * 8]
-    # 每个商品独占一行：左侧商品文案，右侧操作按钮，横向齐平。
+    # 九大类统一为：每行左侧项目文案，右侧对应操作按钮。
     kb = types.InlineKeyboardMarkup(row_width=2)
-    product_icons = {"apple": "🍎", "tg": "✈️", "ai": "🤖", "node": "🌐"}
+    product_icons = {
+        "apple": "🍎", "tg": "✈️", "ai": "🤖", "social": "👥",
+        "email": "✉️", "video": "🎬", "communication": "💬",
+        "commerce": "🛒", "node": "🌐"
+    }
     product_icon = product_icons.get(cat_id, "🛍️")
     for product_index, product in enumerate(selected, start=page * 8 + 1):
-        callback = f"buy_{product['id']}_{page}"
-        label = f"{product_icon} {product_index}. {product['name']} | {product['price']} U"
+        if cat_id in BRAND_GROUPS:
+            callback = f"brand_{cat_id}_{product['brand_index']}"
+            action_label = "查看"
+            item_name = product["name"]
+        else:
+            callback = f"buy_{product['id']}_{page}"
+            action_label = "购买"
+            item_name = f"{product['name']} | {product['price']} U"
+        label = f"{product_icon} {product_index}. {item_name}"
         kb.row(
             premium_button(label, callback_data=callback),
-            premium_button("购买", callback_data=callback)
+            premium_button(action_label, callback_data=callback)
         )
     if not selected:
         kb.add(premium_button("商品整理上架中", callback_data="show_support"))
     previous_page = max(0, page - 1)
     next_page = min(pages - 1, page + 1)
-    back_btn = "cat_account" if cat_id in ["apple", "tg", "ai"] else "ui_buy"
-    # 三个控件并排放在同一行，并分别使用不同的 Telegram Premium 表情图标。
     kb.row(
         premium_button("上一页", callback_data=f"products_{cat_id}_{previous_page}"),
         premium_button("下一页", callback_data=f"products_{cat_id}_{next_page}"),
-        premium_button("返回", callback_data=back_btn)
+        premium_button("返回", callback_data="cat_account")
     )
     return kb
 
@@ -869,13 +890,10 @@ def show_brand_group(call):
     if not group:
         bot.answer_callback_query(call.id, "分类不存在", show_alert=True)
         return
-    brand_count = len(group["brands"])
-    text = (
-        f"🏷️ <b>{group['title']}</b>\n"
-        f"📊 当前分类：<b>{brand_count} 种账号</b>\n\n"
-        "👇 请选择具体账号品牌。商品、库存和售价以实际上架信息为准。"
+    safe_edit(
+        bot, call.message.chat.id, call.message.message_id,
+        get_product_page_text(group_id, 0), get_products_kb(group_id, 0)
     )
-    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_brand_group_kb(group_id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("brand_"))
 def show_brand_notice(call):
@@ -907,15 +925,6 @@ def show_category_list(call):
         "video": "🎬 <b>视频账号</b>",
         "node": f"🌐 <b>节点套餐（{len(NODE_PRODUCTS)} 种套餐）</b>"
     }
-    if cat_id == "video":
-        group = BRAND_GROUPS["video"]
-        brand_count = len(group["brands"])
-        safe_edit(
-            bot, call.message.chat.id, call.message.message_id,
-            f"🎬 <b>{group['title']}</b>\n📊 当前分类：<b>{brand_count} 种账号</b>\n\n👇 请选择具体账号品牌。",
-            get_brand_group_kb("video")
-        )
-        return
     safe_edit(
         bot, call.message.chat.id, call.message.message_id,
         get_product_page_text(cat_id, 0), get_products_kb(cat_id, 0)
@@ -933,7 +942,7 @@ def show_product_page(call):
         page = int(parts[2])
     except ValueError:
         page = 0
-    if cat_id not in ("apple", "tg", "ai", "node"):
+    if cat_id not in ("apple", "tg", "ai", "social", "email", "video", "communication", "commerce", "node"):
         bot.answer_callback_query(call.id, "商品分类不存在。", show_alert=True)
         return
     safe_edit(
