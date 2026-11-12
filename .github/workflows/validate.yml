@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile latest bot modules
-        run: python -m py_compile bot.py payment_listener.py telegram_storage.py
+        run: python -m py_compile bot.py payment_listener.py telegram_storage.py products/*.py
       - name: Check global two-column keyboard enforcement
         run: |
           python - <<'PY'
