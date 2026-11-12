@@ -3,6 +3,10 @@ import telebot, time, json, os, re, html, io, hashlib, zipfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from telebot import types
+from products.catalog import (
+    APPLE_PRODUCTS, TG_PRODUCTS, INSTAGRAM_PRODUCTS, AI_PRODUCTS, NODE_PRODUCTS,
+    PRODUCT_CATALOGS, get_all_products,
+)
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
@@ -97,81 +101,6 @@ def premiumize_text(value):
 
 
 # ================= 完整真实数据区 =================
-APPLE_PRODUCTS = [
-    {"id": "a1", "name": "美区共享号｜已购小火箭", "price": "2.78"},
-    {"id": "a2", "name": "香港｜半年号｜完整密保", "price": "2.78"},
-    {"id": "a3", "name": "美区｜半年号｜完整密保", "price": "2.78"},
-    {"id": "a4", "name": "韩国｜半年号｜完整密保", "price": "2.78"},
-    {"id": "a5", "name": "日本｜半年号｜完整密保", "price": "2.78"},
-    {"id": "a6", "name": "日本老号｜完整密保｜独享", "price": "5.21"},
-    {"id": "a7", "name": "马来西亚老号｜完整密保｜独享", "price": "5.21"},
-    {"id": "a8", "name": "台湾｜独享｜仅限 App Store", "price": "5.56"},
-    {"id": "a9", "name": "美国 IC｜可激活 iCloud", "price": "8.06"},
-    {"id": "a10", "name": "独享下载号｜iCloud 后缀", "price": "8.25"},
-    {"id": "a11", "name": "1–5 年老号｜稳定 IC", "price": "9.70"},
-    {"id": "a12", "name": "2010–2020 年老号", "price": "10.39"},
-    {"id": "a13", "name": "美国免税区｜可激活 iCloud", "price": "10.58"},
-    {"id": "a14", "name": "完整密保｜独享下载号", "price": "10.90"},
-    {"id": "a15", "name": "冷门国家｜独享下载号", "price": "11.09"},
-    {"id": "a16", "name": "台湾 13–19 年私人号｜禁 IM", "price": "12.11"},
-    {"id": "a17", "name": "美国 13–19 年私人号｜免税区", "price": "12.11"},
-    {"id": "a18", "name": "10 个月以上｜稳定 IC", "price": "12.48"},
-    {"id": "a19", "name": "美国｜10 年以上", "price": "13.25"},
-    {"id": "a20", "name": "5–10 年老 IC", "price": "13.68"},
-    {"id": "a21", "name": "15 年以上珍藏老号", "price": "19.24"},
-    {"id": "a22", "name": "15 年以上老 IC", "price": "20.63"},
-    {"id": "a23", "name": "已购小火箭（Shadowrocket）", "price": "24.30"},
-    {"id": "a24", "name": "美国 5–10 年私人号｜小火箭", "price": "61.11"},
-    {"id": "a25", "name": "美国 15 年以上私人号｜小火箭", "price": "105.08"}
-]
-
-TG_PRODUCTS = [
-    {"id": "t1", "name": "✈️ 美国 +1 成品号", "price": "4.5"},
-    {"id": "t2", "name": "✈️ 印度 +91 成品号", "price": "2.0"},
-    {"id": "t3", "name": "✈️ 印尼 +62 成品号", "price": "3.0"},
-    {"id": "t4", "name": "✈️ 菲律宾 +63 成品号", "price": "3.5"},
-    {"id": "t5", "name": "✈️ 越南 +84 成品号", "price": "4.0"}
-]
-
-INSTAGRAM_PRODUCTS = [
-    {"id": "ig1971", "name": "Instagram账号｜注册10-12个月｜已设置2FA", "price": "2.49"},
-    {"id": "ig2230", "name": "Instagram账号｜注册1-7天｜已设置2FA｜包含cookie｜优质账号", "price": "0.50"},
-    {"id": "ig1481", "name": "Instagram账号｜注册1-7天｜2FA登录｜包含cookie", "price": "0.56"},
-    {"id": "ig7181", "name": "Instagram账号｜已通过手机号验证｜已设置2FA｜无邮箱", "price": "1.21"},
-    {"id": "ig8125", "name": "Instagram账号｜注册1-3个月｜已设置2FA｜真机注册｜高质量｜2FA轻松登录", "price": "1.25"},
-    {"id": "ig3163", "name": "Instagram账号｜firstmail邮箱可用｜已设置2FA", "price": "1.50"},
-    {"id": "ig7169", "name": "Instagram账号｜印度尼西亚｜已通过手机号验证｜已设置2FA｜无邮箱", "price": "1.50"},
-    {"id": "ig7170", "name": "Instagram账号｜印度｜已通过手机号验证｜已设置2FA｜无邮箱", "price": "1.50"},
-    {"id": "ig3732", "name": "Threads账号｜手机已验证｜无邮箱｜已设置2FA｜首登时需自行激活Threads", "price": "1.71"},
-    {"id": "ig1624", "name": "Instagram账号｜注册6-10个月｜2FA登录｜高质量", "price": "1.74"},
-    {"id": "ig6145", "name": "Threads账号｜@firstmail.ltd邮箱可用｜已设置2FA", "price": "2.41"},
-    {"id": "ig5545", "name": "Instagram账号｜注册90天+｜邮箱无效｜已设置2FA", "price": "3.00"},
-    {"id": "ig3067", "name": "Instagram账号｜注册6个月｜粉丝10+｜firstmail邮箱可用｜已设置2FA", "price": "3.00"},
-    {"id": "ig3065", "name": "Instagram账号｜帖子1-10篇｜firstmail邮箱可用｜已设置2FA", "price": "3.21"},
-    {"id": "ig1468", "name": "Instagram账号｜2025年老号｜注册1年+｜Firstmail邮箱可用｜高质量账户｜已设置2FA", "price": "3.73"},
-    {"id": "ig6195", "name": "Instagram账号｜帖子10-20篇｜firstmail邮箱可用｜已设置2FA", "price": "3.83"},
-    {"id": "ig6151", "name": "Instagram账号｜帖子20-30篇｜@firstmail邮箱可用｜已设置2FA", "price": "4.46"},
-    {"id": "ig6207", "name": "Instagram账号｜2024-2025年｜firstmail邮箱可用｜邮箱接码登录", "price": "4.50"},
-    {"id": "ig1912", "name": "Instagram账号｜2024年注册｜已设置2FA｜包含cookie", "price": "5.50"},
-    {"id": "ig7326", "name": "Instagram账号｜2015-2023年老号｜头像随机｜包含cookie｜已设置2FA｜精品老号", "price": "7.10"},
-    {"id": "ig2357", "name": "Threads账号｜注册2个月+｜手机已验证｜无邮箱｜已设置2FA", "price": "7.21"},
-    {"id": "ig5543", "name": "Threads账号｜注册90天+｜随机地区｜手机已验证｜无邮箱｜已设置2FA｜首登时需自行激活Threads", "price": "8.99"},
-    {"id": "ig2358", "name": "Threads账号｜注册6个月+｜手机已验证｜无邮箱｜已设置2FA", "price": "11.99"},
-    {"id": "ig5319", "name": "Instagram账号｜2025-2026年注册｜包含头像｜帖子20-100｜粉丝0-30｜已设置2FA", "price": "12.43"},
-    {"id": "ig1914", "name": "Instagram账号｜2015-2024年注册｜帖子5-100｜已设置2FA｜包含cookie", "price": "12.49"},
-    {"id": "ig2094", "name": "Instagram账号｜2015-2024年注册｜粉丝100+｜帖子0-4｜已设置2FA｜包含cookie", "price": "12.49"},
-    {"id": "ig2093", "name": "Instagram账号｜2015-2024年注册｜粉丝100+｜帖子5-100｜已设置2FA｜包含cookie", "price": "20.61"},
-]
-
-AI_PRODUCTS = [
-    {"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"}
-]
-
-NODE_PRODUCTS = [
-    {"id": "n1", "name": "🌐 高速专线节点 100G", "price": "10.0"},
-    {"id": "n2", "name": "🚀 极速抗封锁节点 500G", "price": "30.0"},
-    {"id": "n3", "name": "💎 独享顶级节点 1T", "price": "50.0"}
-]
 # ================================================
 
 
@@ -623,20 +552,14 @@ def get_brand_group_kb(group_id):
     return kb
 
 def get_product_catalog(cat_id):
-    catalogs = {
-        "apple": APPLE_PRODUCTS,
-        "tg": TG_PRODUCTS,
-        "instagram": INSTAGRAM_PRODUCTS,
-        "ai": AI_PRODUCTS,
-        "node": NODE_PRODUCTS,
-    }
-    # 其余五大类目前展示已配置的品牌入口，不伪造商品、库存或价格。
+    # Sale rows are centrally registered in products/catalog.py.
+    # Brand-only groups remain navigation until their original item rows are loaded.
     if cat_id in BRAND_GROUPS:
         return [
             {"id": f"{cat_id}_{i}", "name": name, "brand_index": i}
             for i, (name, _emoji) in enumerate(BRAND_GROUPS[cat_id]["brands"])
         ]
-    return catalogs.get(cat_id, [])
+    return PRODUCT_CATALOGS.get(cat_id, [])
 
 
 def get_product_page_text(cat_id, page=0):
@@ -987,7 +910,7 @@ def buy_item(call):
         return_page = max(0, int(parts[2])) if len(parts) > 2 else 0
     except ValueError:
         return_page = 0
-    all_products = APPLE_PRODUCTS + TG_PRODUCTS + INSTAGRAM_PRODUCTS + AI_PRODUCTS + NODE_PRODUCTS
+    all_products = get_all_products()
     p = next((x for x in all_products if x["id"] == prod_id), None)
     if not p:
         bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
