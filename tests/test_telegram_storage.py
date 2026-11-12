@@ -80,16 +80,30 @@ class TelegramArchiveStoreTests(unittest.TestCase):
             self.assertEqual(recovered.load("users", {}), {"123": {"balance": 7.5}})
             self.assertEqual(recovered.load("orders", []), [{"order_id": "A1"}])
 
-    def test_failed_upload_rolls_back_in_memory_change(self):
+    def test_failed_flush_keeps_latest_in_memory_data_and_retries(self):
         bot = FakeBot()
         store = TelegramArchiveStore(bot, -1004459109788)
         store.initialize()
         store.save("users", {"123": {"balance": 2}})
+        store.flush()
+
+        store.save("users", {"123": {"balance": 99}})
         bot.fail_send = True
         bot.fail_edit = True
         with self.assertRaises(RuntimeError):
-            store.save("users", {"123": {"balance": 99}})
-        self.assertEqual(store.load("users", {}), {"123": {"balance": 2}})
+            store.flush()
+
+        # A failed background persistence attempt must not roll back live
+        # process data or clear the dirty flag; the next flush can retry it.
+        self.assertEqual(store.load("users", {}), {"123": {"balance": 99}})
+        self.assertTrue(store.dirty)
+
+        bot.fail_send = False
+        bot.fail_edit = False
+        self.assertTrue(store.flush())
+        recovered = TelegramArchiveStore(bot, -1004459109788)
+        recovered.initialize()
+        self.assertEqual(recovered.load("users", {}), {"123": {"balance": 99}))
 
 
     def test_meta_dictionary_can_be_saved_and_recovered(self):
@@ -97,6 +111,7 @@ class TelegramArchiveStoreTests(unittest.TestCase):
         store = TelegramArchiveStore(bot, -1004459109788)
         store.initialize()
         store.save("meta", {"last_daily_report": "2026-11-12"})
+        self.assertTrue(store.flush())
         recovered = TelegramArchiveStore(bot, -1004459109788)
         recovered.initialize()
         self.assertEqual(
@@ -114,6 +129,7 @@ class TelegramArchiveStoreTests(unittest.TestCase):
 
         store.save("users", {"123": {"balance": 10}})
         store.save("meta", {"last_daily_report": "2026-11-12"})
+        self.assertTrue(store.flush())
 
         self.assertEqual(len(bot.messages), 1)
         self.assertEqual(store.archive_message_id, first_message_id)
