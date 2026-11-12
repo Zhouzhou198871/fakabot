@@ -579,19 +579,61 @@ def get_brand_group_kb(group_id):
     kb.row(premium_button("返回账号商城", callback_data="cat_account"))
     return kb
 
-def get_products_kb(cat_id):
+def get_product_catalog(cat_id):
+    catalogs = {
+        "apple": APPLE_PRODUCTS,
+        "tg": TG_PRODUCTS,
+        "ai": AI_PRODUCTS,
+        "node": NODE_PRODUCTS,
+    }
+    return catalogs.get(cat_id, [])
+
+
+def get_product_page_text(cat_id, page=0):
+    products = get_product_catalog(cat_id)
+    total = len(products)
+    pages = max(1, (total + 7) // 8)
+    page = max(0, min(int(page), pages - 1))
+    titles = {
+        "apple": ("🍎", "苹果 ID 专区", "覆盖不同地区、账号年限及使用需求。请先阅读商品名称和适用说明，再选择对应商品。"),
+        "tg": ("✈️", "TG 账号专区", "提供不同国家区号的 Telegram 账号。购买前请核对国家区号及账号用途。"),
+        "ai": ("🤖", "AI 账号专区", "汇集 AI 工具账号选项。请根据服务类型和使用需求选择。"),
+        "node": ("🌐", "节点套餐专区", "按流量和使用需求选择套餐；购买前请确认套餐规格。"),
+    }
+    icon, title, intro = titles.get(cat_id, ("🛍️", "商品专区", "请选择适合您的商品。"))
+    first = page * 8 + 1 if total else 0
+    last = min((page + 1) * 8, total)
+    return (
+        f"{icon} <b>{title}</b>\n"
+        f"📦 商品数量：<b>{total} 种</b>\n"
+        f"📄 当前页：<b>{page + 1}/{pages}</b> · 显示第 <b>{first}-{last}</b> 项\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"{intro}\n\n"
+        "👇 <b>请选择下方商品查看详情与价格：</b>"
+    )
+
+
+def get_products_kb(cat_id, page=0):
+    products = get_product_catalog(cat_id)
+    total = len(products)
+    pages = max(1, (total + 7) // 8)
+    page = max(0, min(int(page), pages - 1))
+    selected = products[page * 8:(page + 1) * 8]
     kb = types.InlineKeyboardMarkup(row_width=2)
-    if cat_id == "apple": products = APPLE_PRODUCTS
-    elif cat_id == "tg": products = TG_PRODUCTS
-    elif cat_id == "ai": products = AI_PRODUCTS
-    elif cat_id == "node": products = NODE_PRODUCTS
-    else: products = []
-    for p in products:
-        btn = premium_button(f"{p['name']} | {p['price']} U", callback_data=f"buy_{p['id']}")
-        kb.add(btn)
-    if not products:
+    for product_index, product in enumerate(selected, start=page * 8 + 1):
+        # Keep each product's own symbol/name/price together on its button.
+        label = f"{product_index}. {product['name']} | {product['price']} U"
+        kb.add(premium_button(label, callback_data=f"buy_{product['id']}_{page}"))
+    if not selected:
         kb.add(premium_button("商品整理上架中", callback_data="show_support"))
-    back_btn = "cat_account" if cat_id in ["apple", "tg", "ai", "video"] else "ui_buy"
+    if pages > 1:
+        previous_page = max(0, page - 1)
+        next_page = min(pages - 1, page + 1)
+        kb.row(
+            premium_button("⬅️ 上一页", callback_data=f"products_{cat_id}_{previous_page}"),
+            premium_button("下一页 ➡️", callback_data=f"products_{cat_id}_{next_page}")
+        )
+    back_btn = "cat_account" if cat_id in ["apple", "tg", "ai"] else "ui_buy"
     kb.add(premium_button("返回上一级", callback_data=back_btn))
     return kb
 
@@ -853,11 +895,40 @@ def show_category_list(call):
             get_brand_group_kb("video")
         )
         return
-    safe_edit(bot, call.message.chat.id, call.message.message_id, f"{titles.get(cat_id, '商品列表')}\n👇 <i>请选择：</i>", get_products_kb(cat_id))
+    safe_edit(
+        bot, call.message.chat.id, call.message.message_id,
+        get_product_page_text(cat_id, 0), get_products_kb(cat_id, 0)
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("products_"))
+def show_product_page(call):
+    bot.answer_callback_query(call.id)
+    parts = call.data.split("_")
+    if len(parts) != 3:
+        bot.answer_callback_query(call.id, "商品分页参数无效，请重新打开分类。", show_alert=True)
+        return
+    cat_id = parts[1]
+    try:
+        page = int(parts[2])
+    except ValueError:
+        page = 0
+    if cat_id not in ("apple", "tg", "ai", "node"):
+        bot.answer_callback_query(call.id, "商品分类不存在。", show_alert=True)
+        return
+    safe_edit(
+        bot, call.message.chat.id, call.message.message_id,
+        get_product_page_text(cat_id, page), get_products_kb(cat_id, page)
+    )
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
 def buy_item(call):
-    prod_id = call.data.replace("buy_", "")
+    parts = call.data.split("_")
+    prod_id = parts[1] if len(parts) > 1 else ""
+    try:
+        return_page = max(0, int(parts[2])) if len(parts) > 2 else 0
+    except ValueError:
+        return_page = 0
     all_products = APPLE_PRODUCTS + TG_PRODUCTS + AI_PRODUCTS + NODE_PRODUCTS
     p = next((x for x in all_products if x["id"] == prod_id), None)
     if not p:
@@ -882,7 +953,8 @@ def buy_item(call):
     else:
         detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
 
-    back_cb = "list_apple" if prod_id.startswith("a") else ("list_tg" if prod_id.startswith("t") else ("list_ai" if prod_id.startswith("ai") else "cat_node"))
+    back_cat = "apple" if prod_id.startswith("a") else ("tg" if prod_id.startswith("t") else ("ai" if prod_id.startswith("ai") else "node"))
+    back_cb = f"products_{back_cat}_{return_page}"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button("💳 在线支付", callback_data=f"pay_{prod_id}"), premium_button("💬 联系客服", url="https://t.me/qingtian_Boss"))
     kb.add(premium_button("🔙 返回列表", callback_data=back_cb))
