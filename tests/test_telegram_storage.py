@@ -40,6 +40,9 @@ class FakeBot:
     def edit_message_media(self, media, chat_id, message_id):
         if self.fail_edit:
             raise RuntimeError("simulated Telegram edit outage")
+        previous = self.messages.get(message_id)
+        if previous and getattr(previous, "document", None):
+            self.documents.pop(previous.document.file_id, None)
         file_id = "file-edit-" + str(self.next_id)
         self.next_id += 1
         self.documents[file_id] = media.media.read()
