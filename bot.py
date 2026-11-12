@@ -38,15 +38,15 @@ def premium_button(text, **kwargs):
     probe = (label + " " + str(kwargs.get("callback_data", ""))).lower()
     if any(x in probe for x in ("充值", "支付", "usdt", "pay_")):
         key = "usdt"
-    elif any(x in probe for x in ("苹果", "apple", "list_apple")):
+    elif "🍎" in probe or any(x in probe for x in ("苹果", "apple", "list_apple")):
         key = "apple"
-    elif any(x in probe for x in ("tg账号", "telegram", "list_tg")):
+    elif "✈" in probe or any(x in probe for x in ("tg账号", "telegram", "list_tg")):
         key = "tg"
-    elif any(x in probe for x in ("ai", "claude", "chatgpt")):
+    elif "🤖" in probe or any(x in probe for x in ("ai", "claude", "chatgpt")):
         key = "ai"
     elif any(x in probe for x in ("影音", "视频", "游戏")):
         key = "video"
-    elif any(x in probe for x in ("节点", "node")):
+    elif "🌐" in probe or any(x in probe for x in ("节点", "node")):
         key = "node"
     elif any(x in probe for x in ("邀请", "奖励")):
         key = "gift"
@@ -620,9 +620,11 @@ def get_products_kb(cat_id, page=0):
     page = max(0, min(int(page), pages - 1))
     selected = products[page * 8:(page + 1) * 8]
     kb = types.InlineKeyboardMarkup(row_width=2)
+    product_icons = {"apple": "🍎", "tg": "✈️", "ai": "🤖", "node": "🌐"}
+    product_icon = product_icons.get(cat_id, "🛍️")
     for product_index, product in enumerate(selected, start=page * 8 + 1):
-        # Keep each product's own symbol/name/price together on its button.
-        label = f"{product_index}. {product['name']} | {product['price']} U"
+        # The matching Telegram custom emoji logo is attached by premium_button.
+        label = f"{product_icon} {product_index}. {product['name']} | {product['price']} U"
         kb.add(premium_button(label, callback_data=f"buy_{product['id']}_{page}"))
     if not selected:
         kb.add(premium_button("商品整理上架中", callback_data="show_support"))
@@ -936,7 +938,9 @@ def buy_item(call):
         return
     bot.answer_callback_query(call.id)
 
-    if prod_id.startswith("a"):
+    if prod_id.startswith("ai"):
+        detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
+    elif prod_id.startswith("a"):
         detail = (
             f"🛍 <b>商品详情：{p['name']}</b>\n"
             f"💰 <b>售价：</b> <code>{p['price']} U</code>\n"
@@ -953,7 +957,7 @@ def buy_item(call):
     else:
         detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
 
-    back_cat = "apple" if prod_id.startswith("a") else ("tg" if prod_id.startswith("t") else ("ai" if prod_id.startswith("ai") else "node"))
+    back_cat = "ai" if prod_id.startswith("ai") else ("apple" if prod_id.startswith("a") else ("tg" if prod_id.startswith("t") else "node"))
     back_cb = f"products_{back_cat}_{return_page}"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(premium_button("💳 在线支付", callback_data=f"pay_{prod_id}"), premium_button("💬 联系客服", url="https://t.me/qingtian_Boss"))
