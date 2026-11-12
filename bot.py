@@ -573,9 +573,9 @@ def get_account_kb():
 def get_brand_group_kb(group_id):
     group = BRAND_GROUPS[group_id]
     kb = types.InlineKeyboardMarkup(row_width=2)
-    for brand_name, brand_emoji in group["brands"]:
+    for brand_index, (brand_name, brand_emoji) in enumerate(group["brands"]):
         # Brand-specific Premium emoji IDs are intentionally not fabricated.
-        kb.add(premium_button(f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{len(kb.keyboard)}"))
+        kb.add(premium_button(f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{brand_index}"))
     kb.row(premium_button("返回账号商城", callback_data="cat_account"))
     return kb
 
