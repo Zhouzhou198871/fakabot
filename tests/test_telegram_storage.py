@@ -15,9 +15,13 @@ class FakeBot:
         self.next_id = 1
         self.fail_send = False
         self.fail_edit = False
+        self.sent_messages = []
 
     def get_chat(self, chat_id):
         return SimpleNamespace(type="channel", username=None, pinned_message=self.pinned_message)
+
+    def send_message(self, chat_id, text, parse_mode=None, disable_web_page_preview=True):
+        self.sent_messages.append((chat_id, text, parse_mode))
 
     def send_document(self, chat_id, document, caption, disable_notification=True):
         if self.fail_send:
@@ -105,6 +109,30 @@ class TelegramArchiveStoreTests(unittest.TestCase):
         recovered.initialize()
         self.assertEqual(recovered.load("users", {}), {"123": {"balance": 99}})
 
+
+
+    def test_report_snapshot_updates_the_pinned_recovery_archive(self):
+        bot = FakeBot()
+        store = TelegramArchiveStore(bot, -1004459109788)
+        store.initialize()
+        pinned_message_id = store.archive_message_id
+
+        store.save("users", {"123": {"balance": 88.5}})
+        store.save("orders", [{"order_id": "LATEST"}])
+        store.send_report_snapshot("<b>三小时汇报</b>", "三小时运营汇报")
+
+        # A report must not create a second, unpinned JSON file. The one pinned
+        # document must contain the newest business data and survive restart.
+        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(len(bot.documents), 1)
+        self.assertEqual(store.archive_message_id, pinned_message_id)
+        self.assertEqual(bot.pinned_message.message_id, pinned_message_id)
+        self.assertEqual(len(bot.sent_messages), 1)
+
+        recovered = TelegramArchiveStore(bot, -1004459109788)
+        recovered.initialize()
+        self.assertEqual(recovered.load("users", {}), {"123": {"balance": 88.5}})
+        self.assertEqual(recovered.load("orders", []), [{"order_id": "LATEST"}])
 
     def test_meta_dictionary_can_be_saved_and_recovered(self):
         bot = FakeBot()
