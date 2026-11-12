@@ -606,16 +606,21 @@ def get_products_kb(cat_id, page=0):
         "commerce": "🛒", "node": "🌐"
     }
     product_icon = product_icons.get(cat_id, "🛍️")
-    for product_index, product in enumerate(selected, start=page * 8 + 1):
-        if cat_id in BRAND_GROUPS:
-            callback = f"brand_{cat_id}_{product['brand_index']}"
-            item_name = product["name"]
-            label = f"{item_name}"
-        else:
+    if cat_id in BRAND_GROUPS:
+        brand_buttons = [
+            premium_button(
+                product["name"],
+                callback_data=f"brand_{cat_id}_{product['brand_index']}"
+            )
+            for product in selected
+        ]
+        for index in range(0, len(brand_buttons), 2):
+            kb.row(*brand_buttons[index:index + 2])
+    else:
+        for product_index, product in enumerate(selected, start=page * 8 + 1):
             callback = f"buy_{product['id']}_{page}"
-            item_name = f"{product['name']} | {product['price']} U"
-            label = f"{product_icon} {product_index}. {item_name}"
-        kb.add(premium_button(label, callback_data=callback))
+            label = f"{product_icon} {product_index}. {product['name']} | {product['price']} U"
+            kb.add(premium_button(label, callback_data=callback))
     if not selected:
         kb.add(premium_button("暂无已登记商品", callback_data="show_support"))
     previous_page = max(0, page - 1)
