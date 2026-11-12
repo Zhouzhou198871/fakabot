@@ -620,18 +620,16 @@ def get_products_kb(cat_id, page=0):
     pages = max(1, (total + 7) // 8)
     page = max(0, min(int(page), pages - 1))
     selected = products[page * 8:(page + 1) * 8]
-    kb = types.InlineKeyboardMarkup(row_width=2)
+    # 商品列表固定单列：每个商品独占一行，避免长名称在两列布局中被截断。
+    kb = types.InlineKeyboardMarkup(row_width=1)
     product_icons = {"apple": "🍎", "tg": "✈️", "ai": "🤖", "node": "🌐"}
     product_icon = product_icons.get(cat_id, "🛍️")
-    product_buttons = []
     for product_index, product in enumerate(selected, start=page * 8 + 1):
         # The matching Telegram custom emoji logo is attached by premium_button.
         label = f"{product_icon} {product_index}. {product['name']} | {product['price']} U"
-        product_buttons.append(
+        kb.row(
             premium_button(label, callback_data=f"buy_{product['id']}_{page}")
         )
-    for button_index in range(0, len(product_buttons), 2):
-        kb.row(*product_buttons[button_index:button_index + 2])
     if not selected:
         kb.add(premium_button("商品整理上架中", callback_data="show_support"))
     if pages > 1:
