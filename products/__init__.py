@@ -1,0 +1,1 @@
+# Product catalog package. Product rows live in one file per category.
