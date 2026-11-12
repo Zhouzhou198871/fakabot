@@ -39,6 +39,10 @@ def premium_button(text, **kwargs):
     probe = (str(text) + " " + str(kwargs.get("callback_data", ""))).lower()
     if any(x in probe for x in ("充值", "支付", "usdt", "pay_")):
         key = "usdt"
+    elif "上一页" in probe:
+        key = "star"
+    elif "下一页" in probe:
+        key = "diamond"
     elif "🍎" in probe or any(x in probe for x in ("苹果", "apple", "list_apple")):
         key = "apple"
     elif "✈" in probe or any(x in probe for x in ("tg账号", "telegram", "list_tg")):
@@ -51,10 +55,6 @@ def premium_button(text, **kwargs):
         key = "node"
     elif any(x in probe for x in ("邀请", "奖励")):
         key = "gift"
-    elif "上一页" in probe:
-        key = "star"
-    elif "下一页" in probe:
-        key = "diamond"
     elif any(x in probe for x in ("客服", "帮助", "返回", "更多")):
         key = "gear"
     elif any(x in probe for x in ("商城", "账号铺", "商品")):
