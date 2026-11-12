@@ -134,9 +134,7 @@ TG_PRODUCTS = [
 ]
 
 AI_PRODUCTS = [
-    {"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"},
-    {"id": "ai2", "name": "🤖 Claude 3 独享账号", "price": "15.0"},
-    {"id": "ai3", "name": "🎨 Midjourney 共享号", "price": "20.0"}
+    {"id": "ai1", "name": "🤖 ChatGPT 独享账号", "price": "12.0"}
 ]
 
 NODE_PRODUCTS = [
