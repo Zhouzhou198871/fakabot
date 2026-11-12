@@ -552,11 +552,10 @@ def get_brand_group_kb(group_id):
     return kb
 
 def get_product_catalog(cat_id):
-    # Sale rows are centrally registered in products/catalog.py.
-    # Brand-only groups remain navigation until their original item rows are loaded.
+    # Brand groups are navigation only. Never expose a brand placeholder as a sale item.
     if cat_id in BRAND_GROUPS:
         return [
-            {"id": f"{cat_id}_{i}", "name": name, "brand_index": i}
+            {"id": f"{cat_id}_{i}", "name": name, "brand_index": i, "is_brand_entry": True}
             for i, (name, _emoji) in enumerate(BRAND_GROUPS[cat_id]["brands"])
         ]
     return PRODUCT_CATALOGS.get(cat_id, [])
@@ -582,7 +581,7 @@ def get_product_page_text(cat_id, page=0):
     icon, title, intro = titles.get(cat_id, ("🛍️", "商品专区", "请选择适合您的商品。"))
     first = page * 8 + 1 if total else 0
     last = min((page + 1) * 8, total)
-    item_label = "商品" if cat_id in ("apple", "tg", "instagram", "ai", "node") else "品牌入口"
+    item_label = "平台入口" if cat_id in BRAND_GROUPS else "商品"
     return (
         f"{icon} <b>{title}</b>\n"
         f"📦 {item_label}数量：<b>{total} 种</b>\n"
@@ -599,8 +598,8 @@ def get_products_kb(cat_id, page=0):
     pages = max(1, (total + 7) // 8)
     page = max(0, min(int(page), pages - 1))
     selected = products[page * 8:(page + 1) * 8]
-    # 九大类统一为单列：每个商品/品牌入口独占一行，点击整行直接进入对应流程。
-    kb = types.InlineKeyboardMarkup(row_width=1)
+    # 商品列表单列展示；品牌导航按两列排列，避免品牌入口占满整页。
+    kb = types.InlineKeyboardMarkup(row_width=2 if cat_id in BRAND_GROUPS else 1)
     product_icons = {
         "apple": "🍎", "tg": "✈️", "instagram": "📸", "ai": "🤖", "social": "👥",
         "email": "✉️", "video": "🎬", "communication": "💬",
@@ -611,13 +610,14 @@ def get_products_kb(cat_id, page=0):
         if cat_id in BRAND_GROUPS:
             callback = f"brand_{cat_id}_{product['brand_index']}"
             item_name = product["name"]
+            label = f"{item_name}"
         else:
             callback = f"buy_{product['id']}_{page}"
             item_name = f"{product['name']} | {product['price']} U"
-        label = f"{product_icon} {product_index}. {item_name}"
+            label = f"{product_icon} {product_index}. {item_name}"
         kb.add(premium_button(label, callback_data=callback))
     if not selected:
-        kb.add(premium_button("商品整理上架中", callback_data="show_support"))
+        kb.add(premium_button("暂无已登记商品", callback_data="show_support"))
     previous_page = max(0, page - 1)
     next_page = min(pages - 1, page + 1)
     kb.row(
@@ -857,10 +857,17 @@ def show_brand_notice(call):
     except (IndexError, ValueError):
         bot.answer_callback_query(call.id, "品牌入口无效，请返回重试。", show_alert=True)
         return
+    # Instagram / Threads 当前已有真实商品数据，直接进入可购买商品目录。
     if group_id == "social" and brand_name == "Instagram":
         safe_edit(bot, call.message.chat.id, call.message.message_id, get_product_page_text("instagram", 0), get_products_kb("instagram", 0))
         return
-    text = f"🏷️ <b>{html.escape(brand_name)}</b>\n\n该品牌商品正在整理上架。请联系客服确认可售商品、库存及价格。"
+    # Other brands remain explicit contact-only entries until their original SKU/price
+    # rows are registered; do not fabricate products or show placeholder counts.
+    text = (
+        f"🏷️ <b>{html.escape(brand_name)}</b>\n\n"
+        "该平台目前尚未录入可核对的商品明细。\n"
+        "为避免展示错误货号或价格，请联系客服确认上架信息。"
+    )
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(premium_button("联系客服", url="https://t.me/qingtian_Boss"), premium_button("返回品牌分类", callback_data=f"brands_{group_id}"))
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
