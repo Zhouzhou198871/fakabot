@@ -646,8 +646,8 @@ def get_products_kb(cat_id, page=0):
     pages = max(1, (total + 7) // 8)
     page = max(0, min(int(page), pages - 1))
     selected = products[page * 8:(page + 1) * 8]
-    # 九大类统一为：每行左侧项目文案，右侧对应操作按钮。
-    kb = types.InlineKeyboardMarkup(row_width=2)
+    # 九大类统一为单列：每个商品/品牌入口独占一行，点击整行直接进入对应流程。
+    kb = types.InlineKeyboardMarkup(row_width=1)
     product_icons = {
         "apple": "🍎", "tg": "✈️", "ai": "🤖", "social": "👥",
         "email": "✉️", "video": "🎬", "communication": "💬",
@@ -657,17 +657,12 @@ def get_products_kb(cat_id, page=0):
     for product_index, product in enumerate(selected, start=page * 8 + 1):
         if cat_id in BRAND_GROUPS:
             callback = f"brand_{cat_id}_{product['brand_index']}"
-            action_label = "查看"
             item_name = product["name"]
         else:
             callback = f"buy_{product['id']}_{page}"
-            action_label = "购买"
             item_name = f"{product['name']} | {product['price']} U"
         label = f"{product_icon} {product_index}. {item_name}"
-        kb.row(
-            premium_button(label, callback_data=callback),
-            premium_button(action_label, callback_data=callback)
-        )
+        kb.add(premium_button(label, callback_data=callback))
     if not selected:
         kb.add(premium_button("商品整理上架中", callback_data="show_support"))
     previous_page = max(0, page - 1)
