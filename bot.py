@@ -815,7 +815,13 @@ def show_brand_notice(call):
     group = BRAND_GROUPS.get(group_id)
     if not group:
         return
-    text = f"🏷️ <b>{group['title']}</b>\n\n该品牌商品正在整理上架。请联系客服确认可售商品、库存及价格。"
+    try:
+        brand_index = int(parts[2])
+        brand_name = group["brands"][brand_index][0]
+    except (IndexError, ValueError):
+        bot.answer_callback_query(call.id, "品牌入口无效，请返回重试。", show_alert=True)
+        return
+    text = f"🏷️ <b>{html.escape(brand_name)}</b>\n\n该品牌商品正在整理上架。请联系客服确认可售商品、库存及价格。"
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.row(premium_button("联系客服", url="https://t.me/qingtian_Boss"), premium_button("返回品牌分类", callback_data=f"brands_{group_id}"))
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
