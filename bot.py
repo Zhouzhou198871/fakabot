@@ -787,6 +787,8 @@ def show_account_menu(call):
         "✨ 专注提供全球优质账号，全部现货秒发。\n"
         "🛡️ <b>安全保障</b>：售后质保，提供详细操作指南。\n"
         "⚡ <b>自动发货</b>：24小时无人值守，即买即用。\n\n"
+        "📚 <b>商品分类：共 9 大类</b>\n"
+        "包含苹果 ID、TG、AI、社交、邮箱、视频、通讯、电商及节点套餐。\n\n"
         "👇 请选择您需要的账号类型："
     )
     safe_edit(bot, call.message.chat.id, call.message.message_id, account_shop_text, get_account_kb())
@@ -804,7 +806,12 @@ def show_brand_group(call):
     if not group:
         bot.answer_callback_query(call.id, "分类不存在", show_alert=True)
         return
-    text = f"🏷️ <b>{group['title']}</b>\n\n请选择品牌。具体商品、库存和售价以实际上架信息为准。"
+    brand_count = len(group["brands"])
+    text = (
+        f"🏷️ <b>{group['title']}</b>\n"
+        f"📊 当前分类：<b>{brand_count} 种账号</b>\n\n"
+        "👇 请选择具体账号品牌。商品、库存和售价以实际上架信息为准。"
+    )
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_brand_group_kb(group_id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("brand_"))
@@ -830,10 +837,21 @@ def show_brand_notice(call):
 def show_category_list(call):
     bot.answer_callback_query(call.id)
     cat_id = call.data.replace("list_", "")
-    titles = {"apple": "🍎 <b>苹果ID 专区</b>", "tg": "✈️ <b>TG账号 专区</b>", "ai": "🤖 <b>AI 专区</b>", "video": "🎬 <b>视频账号</b>", "node": "🌐 <b>节点套餐</b>"}
+    titles = {
+        "apple": f"🍎 <b>苹果ID 专区（{len(APPLE_PRODUCTS)} 种账号）</b>",
+        "tg": f"✈️ <b>TG账号 专区（{len(TG_PRODUCTS)} 种账号）</b>",
+        "ai": f"🤖 <b>AI 专区（{len(AI_PRODUCTS)} 种账号）</b>",
+        "video": "🎬 <b>视频账号</b>",
+        "node": f"🌐 <b>节点套餐（{len(NODE_PRODUCTS)} 种套餐）</b>"
+    }
     if cat_id == "video":
         group = BRAND_GROUPS["video"]
-        safe_edit(bot, call.message.chat.id, call.message.message_id, f"🎬 <b>{group['title']}</b>\n\n请选择品牌。", get_brand_group_kb("video"))
+        brand_count = len(group["brands"])
+        safe_edit(
+            bot, call.message.chat.id, call.message.message_id,
+            f"🎬 <b>{group['title']}</b>\n📊 当前分类：<b>{brand_count} 种账号</b>\n\n👇 请选择具体账号品牌。",
+            get_brand_group_kb("video")
+        )
         return
     safe_edit(bot, call.message.chat.id, call.message.message_id, f"{titles.get(cat_id, '商品列表')}\n👇 <i>请选择：</i>", get_products_kb(cat_id))
 
