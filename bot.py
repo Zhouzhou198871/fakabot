@@ -35,7 +35,8 @@ def clean_button_text(value):
 def premium_button(text, **kwargs):
     """统一给所有内联按钮配置 Telegram Premium 自定义表情图标。"""
     label = clean_button_text(text)
-    probe = (label + " " + str(kwargs.get("callback_data", ""))).lower()
+    # Detect category icon from the original label before decorative emoji are stripped.
+    probe = (str(text) + " " + str(kwargs.get("callback_data", ""))).lower()
     if any(x in probe for x in ("充值", "支付", "usdt", "pay_")):
         key = "usdt"
     elif "🍎" in probe or any(x in probe for x in ("苹果", "apple", "list_apple")):
