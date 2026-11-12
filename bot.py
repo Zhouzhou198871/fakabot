@@ -51,6 +51,10 @@ def premium_button(text, **kwargs):
         key = "node"
     elif any(x in probe for x in ("邀请", "奖励")):
         key = "gift"
+    elif "上一页" in probe:
+        key = "star"
+    elif "下一页" in probe:
+        key = "diamond"
     elif any(x in probe for x in ("客服", "帮助", "返回", "更多")):
         key = "gear"
     elif any(x in probe for x in ("商城", "账号铺", "商品")):
@@ -376,8 +380,18 @@ def set_user_language(uid, language):
     save_json_file(USERS_FILE, users)
 
 def enforce_two_column_keyboard(kb):
-    """Arrange inline buttons in two columns without duplicating an existing final back button."""
+    """Keep product catalogs in their explicitly authored one-column layout."""
     if kb is None or not getattr(kb, "keyboard", None):
+        return kb
+    # Product rows must remain one item per line, with the three navigation
+    # controls together on the final line. Do not globally flatten this keyboard.
+    callbacks = [
+        str(getattr(button, "callback_data", "") or "")
+        for row in kb.keyboard for button in row
+    ]
+    if any(value.startswith("buy_") for value in callbacks) and any(
+        value.startswith("products_") for value in callbacks
+    ):
         return kb
     buttons = [button for row in kb.keyboard for button in row]
     if not buttons:
@@ -632,15 +646,15 @@ def get_products_kb(cat_id, page=0):
         )
     if not selected:
         kb.add(premium_button("商品整理上架中", callback_data="show_support"))
-    if pages > 1:
-        previous_page = max(0, page - 1)
-        next_page = min(pages - 1, page + 1)
-        kb.row(
-            premium_button("⬅️ 上一页", callback_data=f"products_{cat_id}_{previous_page}"),
-            premium_button("下一页 ➡️", callback_data=f"products_{cat_id}_{next_page}")
-        )
+    previous_page = max(0, page - 1)
+    next_page = min(pages - 1, page + 1)
     back_btn = "cat_account" if cat_id in ["apple", "tg", "ai"] else "ui_buy"
-    kb.add(premium_button("返回上一级", callback_data=back_btn))
+    # 三个控件并排放在同一行，并分别使用不同的 Telegram Premium 表情图标。
+    kb.row(
+        premium_button("上一页", callback_data=f"products_{cat_id}_{previous_page}"),
+        premium_button("下一页", callback_data=f"products_{cat_id}_{next_page}"),
+        premium_button("返回", callback_data=back_btn)
+    )
     return kb
 
 def get_back_kb():
