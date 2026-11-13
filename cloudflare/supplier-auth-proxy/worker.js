@@ -106,6 +106,7 @@ export default {
       !incoming.pathname.startsWith("/api/") &&
       !incoming.pathname.startsWith("/assets/") &&
       !incoming.pathname.startsWith("/_internal_") &&
+      !incoming.pathname.startsWith("/_internal/") &&
       incoming.pathname !== "/_proxy_health" &&
       !/\\.[a-zA-Z0-9]{1,8}$/.test(incoming.pathname);
     if (isSpaRoute) {
