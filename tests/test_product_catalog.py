@@ -1,14 +1,16 @@
 import unittest
+from decimal import Decimal, ROUND_HALF_UP
 
-from products.catalog import PRODUCT_CATALOGS, get_all_products
+from products.catalog import PRODUCT_CATALOGS, UPSTREAM_CATEGORIES, get_all_products
 
 
 class ProductCatalogTests(unittest.TestCase):
-    def test_registered_categories_have_real_rows(self):
-        self.assertEqual(
-            {key: len(value) for key, value in PRODUCT_CATALOGS.items()},
-            {"apple": 25, "tg": 5, "instagram": 27, "ai": 1, "node": 3},
-        )
+    def test_registered_categories_include_static_and_live_supplier_rows(self):
+        for key in ("apple", "tg", "instagram", "ai", "node"):
+            self.assertIn(key, PRODUCT_CATALOGS)
+            self.assertGreater(len(PRODUCT_CATALOGS[key]), 0)
+        self.assertEqual(len(UPSTREAM_CATEGORIES), 28)
+        self.assertGreater(sum(len(rows) for key, rows in PRODUCT_CATALOGS.items() if key.startswith("up")), 1000)
 
     def test_product_ids_are_unique(self):
         products = get_all_products()
@@ -22,7 +24,18 @@ class ProductCatalogTests(unittest.TestCase):
                     self.assertTrue(product.get("name"))
                     self.assertGreater(float(product["price"]), 0)
 
-    def test_inventory_is_not_part_of_display_catalog_rows(self):
+    def test_upstream_price_uses_cny_cost_divided_by_four(self):
+        products = [p for p in get_all_products() if p.get("is_upstream")]
+        self.assertGreater(len(products), 1000)
+        for product in products:
+            expected = (Decimal(product["price_cny"]) / Decimal("4")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            self.assertEqual(Decimal(product["price"]), expected)
+            self.assertFalse(product["supplier_verified"])
+            self.assertFalse(product["procurement_ready"])
+
+    def test_inventory_is_not_exposed_as_a_bot_local_stock_counter(self):
         for products in PRODUCT_CATALOGS.values():
             for product in products:
                 self.assertNotIn("stock", product)
