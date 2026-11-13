@@ -862,15 +862,43 @@ def show_brand_notice(call):
     except (IndexError, ValueError):
         bot.answer_callback_query(call.id, "品牌入口无效，请返回重试。", show_alert=True)
         return
-    # Instagram / Threads 当前已有真实商品数据，直接进入可购买商品目录。
-    if group_id == "social" and brand_name == "Instagram":
-        safe_edit(bot, call.message.chat.id, call.message.message_id, get_product_page_text("instagram", 0), get_products_kb("instagram", 0))
+    if group_id == "social":
+        # Every social platform gets its own landing page. Only render purchasable
+        # SKUs that actually exist in the catalog; never invent prices or stock.
+        social_catalogs = {
+            "Instagram": ("instagram", len(INSTAGRAM_PRODUCTS), "Instagram / Threads"),
+        }
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        if brand_name in social_catalogs:
+            catalog_id, product_count, display_name = social_catalogs[brand_name]
+            text = (
+                f"🏷️ <b>{html.escape(display_name)} 商品分类</b>\\n\\n"
+                f"📦 已登记商品：<b>{product_count} 种</b>\\n"
+                "👇 点击下方进入完整商品列表，选择具体规格后再购买。"
+            )
+            kb.add(premium_button(
+                f"查看全部商品（{product_count}）",
+                callback_data=f"products_{catalog_id}_0"
+            ))
+        else:
+            text = (
+                f"🏷️ <b>{html.escape(brand_name)} 商品分类</b>\\n\\n"
+                "✅ 平台分类入口已开放。\\n"
+                "⏳ 当前仓库尚未录入该平台可核验的商品 SKU、价格和库存。\\n\\n"
+                "为避免错价或无货订单，暂不开放购买；录入真实商品资料后会自动显示在这里。"
+            )
+            kb.add(premium_button("联系客服 / 提交商品资料", url="https://t.me/qingtian_Boss"))
+        kb.row(
+            premium_button("返回社交账号分类", callback_data="brands_social"),
+            premium_button("返回账号商城", callback_data="cat_account")
+        )
+        safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
         return
-    # Other brands remain explicit contact-only entries until their original SKU/price
-    # rows are registered; do not fabricate products or show placeholder counts.
+
+    # Non-social brand groups keep their own explicit landing page.
     text = (
-        f"🏷️ <b>{html.escape(brand_name)}</b>\n\n"
-        "该平台目前尚未录入可核对的商品明细。\n"
+        f"🏷️ <b>{html.escape(brand_name)}</b>\\n\\n"
+        "该平台目前尚未录入可核对的商品明细。\\n"
         "为避免展示错误货号或价格，请联系客服确认上架信息。"
     )
     kb = types.InlineKeyboardMarkup(row_width=2)
