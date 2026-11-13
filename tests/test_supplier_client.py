@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from supplier_client import DahaoshangClient, SupplierError, SupplierDeliveryPending
+from supplier_client import BASE_URL, DahaoshangClient, SupplierError, SupplierDeliveryPending
 
 
 class FakeResponse:
@@ -39,7 +39,7 @@ class SupplierClientTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "session.json"
         path.write_text(json.dumps({
-            "base_url": "https://dahaoshang.com",
+            "base_url": BASE_URL,
             "access_token": "test-token",
         }), encoding="utf-8")
         os.chmod(path, 0o600)
@@ -52,6 +52,36 @@ class SupplierClientTests(unittest.TestCase):
         self.assertEqual(info["UserId"], 1)
         self.assertEqual(http.headers["Authorization"], "Bearer test-token")
         self.assertNotIn("Password", http.headers)
+
+    def test_checkout_preflight_is_read_only_and_confirms_price_stock_and_balance(self):
+        responses = [
+            {"Code": 200, "Data": {"UserId": 1}},
+            {"Code": 200, "Data": {
+                "ID": "P1", "CategoryId": "C1", "IsOnSale": True,
+                "Price": "8.00", "InStock": 5, "ProductModels": [],
+            }},
+            {"Code": 200, "Data": [{"Text": "余额(¥30.30)", "Value": "BAL"}]},
+        ]
+        client, http = self.make_client(responses)
+        result = client.preflight_purchase("P1", "8.00", quantity=1)
+        self.assertTrue(result["supplier_verified"])
+        self.assertTrue(result["procurement_ready"])
+        self.assertEqual(result["supplier_price_cny"], "8.00")
+        self.assertEqual(len(http.calls), 3)
+        self.assertFalse(any(c[1].endswith("/api/sysorder/buy") for c in http.calls))
+
+    def test_checkout_preflight_rejects_changed_supplier_price_without_purchase(self):
+        responses = [
+            {"Code": 200, "Data": {"UserId": 1}},
+            {"Code": 200, "Data": {
+                "ID": "P1", "CategoryId": "C1", "IsOnSale": True,
+                "Price": "9.00", "InStock": 5, "ProductModels": [],
+            }},
+        ]
+        client, http = self.make_client(responses)
+        with self.assertRaisesRegex(SupplierError, "价格已变化"):
+            client.preflight_purchase("P1", "8.00")
+        self.assertEqual(len(http.calls), 2)
 
     def test_refuses_purchase_when_no_balance_payment_method_exists(self):
         product = {"Code": 200, "Data": {
@@ -67,6 +97,15 @@ class SupplierClientTests(unittest.TestCase):
             client.buy_with_balance("P1")
         self.assertEqual(len(http.calls), 3)
         self.assertNotIn("/api/sysorder/buy", [c[1] for c in http.calls])
+
+    def test_balance_method_with_live_supplier_balance_label_is_recognized(self):
+        methods = [
+            {"Text": "USDT(TRC20)", "Value": "115"},
+            {"Text": "支付宝【推荐】", "Value": "97"},
+            {"Text": "余额(¥30.30)", "Value": "BALANCE"},
+        ]
+        selected = DahaoshangClient._choose_balance_method(methods)
+        self.assertEqual(selected["Value"], "BALANCE")
 
     def test_buy_uses_confirmed_payload_and_reads_content(self):
         responses = [
@@ -88,6 +127,18 @@ class SupplierClientTests(unittest.TestCase):
             "ProductId": "P1", "ModelId": "M1", "PayTypeId": "BAL",
             "Qty": 2, "Email": None,
         })
+
+    def test_purchase_rejects_price_change_after_customer_payment(self):
+        product = {"Code": 200, "Data": {
+            "ID": "P1", "CategoryId": "C1", "IsOnSale": True,
+            "Price": "9.00", "InStock": 5, "ProductModels": [],
+        }}
+        client, http = self.make_client([
+            {"Code": 200, "Data": {"UserId": 1}}, product,
+        ])
+        with self.assertRaisesRegex(SupplierError, "价格发生变化"):
+            client.buy_with_balance("P1", expected_price_cny="8.00")
+        self.assertFalse(any(c[1].endswith("/api/sysorder/buy") for c in http.calls))
 
     def test_multiple_models_require_explicit_choice(self):
         product = {"Code": 200, "Data": {
@@ -227,6 +278,39 @@ class SupplierClientTests(unittest.TestCase):
 
 
 
+    def test_product_without_models_uses_product_stock_and_omits_model_id(self):
+        responses = [
+            {"Code": 200, "Data": {"UserId": 1}},
+            {"Code": 200, "Data": {
+                "ID": "P-NOMODEL", "CategoryId": "C1", "IsOnSale": True,
+                "InStock": 5, "MinBuy": 1, "MaxBuy": 10, "ProductModels": None,
+            }},
+            {"Code": 200, "Data": [{"Text": "余额(¥30.30)", "Value": "BAL"}]},
+            {"Code": 200, "Data": {"ID": "O-NOMODEL", "Entity": {"ID": "O-NOMODEL"}}},
+            {"Code": 200, "Data": {"Content": "delivered-content", "ShipStatus": "已发货"}},
+        ]
+        client, http = self.make_client(responses)
+        result = client.buy_with_balance("P-NOMODEL", quantity=2)
+        self.assertEqual(result["content"], "delivered-content")
+        buy_call = next(c for c in http.calls if c[1].endswith("/api/sysorder/buy"))
+        self.assertEqual(buy_call[3], {
+            "ProductId": "P-NOMODEL", "PayTypeId": "BAL", "Qty": 2, "Email": None,
+        })
+        self.assertNotIn("ModelId", buy_call[3])
+
+    def test_product_purchase_quantity_limits_are_enforced_before_buy(self):
+        product = {"Code": 200, "Data": {
+            "ID": "P-LIMIT", "CategoryId": "C1", "IsOnSale": True,
+            "InStock": 100, "MinBuy": 2, "MaxBuy": 3, "ProductModels": [],
+        }}
+        client, http = self.make_client([
+            {"Code": 200, "Data": {"UserId": 1}}, product,
+        ])
+        with self.assertRaisesRegex(SupplierError, "最小购买数量"):
+            client.buy_with_balance("P-LIMIT", quantity=1)
+        self.assertEqual(len(http.calls), 2)
+
+
+
 if __name__ == "__main__":
     unittest.main()
-
