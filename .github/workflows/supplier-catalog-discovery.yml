@@ -4,13 +4,14 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: read
 jobs:
   discover:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
+      - uses: actions/checkout@v4
       - name: Inspect site app and public catalog endpoints
         run: |
           python - <<'PY'
@@ -100,8 +101,26 @@ jobs:
               x=get(url,1_500_000)
               body=x.pop("body","")
               result["api_probes"].append({**x,"body_excerpt":body[:3500],"json_like":body.lstrip().startswith(("{","["))})
+          api_by_path={urllib.parse.urlsplit(a["url"]).path + (("?"+urllib.parse.urlsplit(a["url"]).query) if urllib.parse.urlsplit(a["url"]).query else ""):a for a in result["public_catalog_api"]}
+          category_payload=api_by_path.get("/api/syscategory/getcategorylist",{}).get("json",{}).get("Data",[])
+          product_payload=api_by_path.get("/api/sysproduct/getproductlist?categoryId=0",{}).get("json",{}).get("Data",[])
+          category_map={str(c.get("ID")):c for c in category_payload}
+          catalog={
+              "source":"https://dahaoshang.com/api/sysproduct/getproductlist?categoryId=0",
+              "fetched_at":result["checked_at"],
+              "price_currency":"CNY",
+              "categories":[{"id":str(c.get("ID","")),"name":c.get("Name",""),"alias":c.get("Alias",""),"icon":c.get("Icon",""),"count":int(c.get("Count",0) or 0),"enabled":bool(c.get("IsEnable"))} for c in category_payload],
+              "products":[
+                  {"id":str(p.get("ID","")),"supplier_product_id":str(p.get("ID","")),"name":p.get("Name",""),"icon":p.get("Icon",""),"price_cny":p.get("Price"),"stock":int(p.get("InStock",0) or 0),"category_id":str(p.get("CategoryId","")),"category_name":category_map.get(str(p.get("CategoryId","")),{}).get("Name",""),"is_on_sale":bool(p.get("IsOnSale")),"is_recommend":bool(p.get("IsRecommend")),"is_hot":bool(p.get("IsHot")),"is_remote":bool(p.get("IsRemote")),"remote_price":p.get("RemotePrice",0),"add_price_factor":p.get("AddPriceFactor",0),"min_buy":int(p.get("MinBuy",0) or 0),"max_buy":int(p.get("MaxBuy",0) or 0)}
+                  for p in product_payload if p.get("ID") and p.get("Name")
+              ]
+          }
+          import os
+          os.makedirs("products",exist_ok=True)
+          with open("products/upstream_catalog.json","w",encoding="utf-8") as f: json.dump(catalog,f,ensure_ascii=False,separators=(",",":"))
+          result["catalog_summary"]={"category_count":len(catalog["categories"]),"product_count":len(catalog["products"]),"on_sale_count":sum(1 for p in catalog["products"] if p["is_on_sale"]),"positive_stock_count":sum(1 for p in catalog["products"] if p["stock"]>0)}
           with open("supplier-catalog-discovery.json","w",encoding="utf-8") as f: json.dump(result,f,ensure_ascii=False,indent=2)
-          print(json.dumps(result,ensure_ascii=False))
+          print(json.dumps({"catalog_summary":result["catalog_summary"],"categories":catalog["categories"]},ensure_ascii=False))
           PY
       - name: Upload discovery report
         uses: actions/upload-artifact@v4
@@ -109,3 +128,12 @@ jobs:
           name: supplier-catalog-discovery
           path: supplier-catalog-discovery.json
           retention-days: 2
+      - name: Commit live upstream catalog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add products/upstream_catalog.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync live Dahaoshang product catalog [skip ci]"
+            git push
+          fi
