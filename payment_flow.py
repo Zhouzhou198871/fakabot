@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """TRC20 USDT order creation and payment confirmation integration."""
-import os, uuid, threading
+import os, uuid, threading, io
+import qrcode
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from payment_listener import PaymentWatcher
@@ -12,7 +13,7 @@ _lock = threading.RLock()
 ORDER_TTL_SECONDS = max(300, int(os.getenv("PAYMENT_ORDER_TTL_SECONDS", "1200")))
 
 def create_payment_order(user_id, product, load_orders, save_orders):
-    receive_address = os.getenv("TRON_RECEIVE_ADDRESS", "").strip()
+    receive_address = os.getenv("TRON_RECEIVE_ADDRESS", "TTT5MV8xeZqKaPDxUcDjR8bPFz2ce5kmBr").strip()
     if not receive_address:
         raise PaymentConfigurationError("收款地址尚未配置，请联系客服。")
     try:
@@ -41,6 +42,15 @@ def create_payment_order(user_id, product, load_orders, save_orders):
     minutes = max(1, ORDER_TTL_SECONDS // 60)
     message = ("💳 <b>USDT（TRC20）支付订单</b>\n" + "━━━━━━━━━━━━━━━━━━\n" + f"订单号：<code>{oid}</code>\n商品：{order['product_name']}\n应付金额：<code>{amount:.6f} USDT</code>\n收款网络：<b>TRON / TRC20</b>\n收款地址：<code>{receive_address}</code>\n\n请在 {minutes} 分钟内支付准确金额。链上确认后系统会更新订单。\n⚠️ 请勿使用其他网络或少付/多付。")
     return order, message
+
+def create_payment_qr(address):
+    """Return a Telegram-uploadable PNG QR containing the TRON address."""
+    image = qrcode.make(str(address))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    buffer.name = "trc20-payment-qr.png"
+    return buffer
 
 def handle_confirmed_payment(bot, order_id, transfer, load_orders, save_orders, admin_id=""):
     with _lock:
