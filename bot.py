@@ -7,6 +7,7 @@ from products.catalog import (
     APPLE_PRODUCTS, TG_PRODUCTS, INSTAGRAM_PRODUCTS, AI_PRODUCTS, NODE_PRODUCTS,
     PRODUCT_CATALOGS, get_all_products,
 )
+from payment_flow import PaymentConfigurationError, PaymentWatcher, create_payment_order, handle_confirmed_payment
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
@@ -114,6 +115,7 @@ ORDERS_FILE = "/root/fakabot/orders.json"
 
 ARCHIVE_CHAT_ID = os.getenv("TELEGRAM_ARCHIVE_CHAT_ID", "-1004459109788").strip()
 ARCHIVE_STORE = None
+PAYMENT_WATCHER = None
 
 def _archive_key(path):
     name = os.path.basename(str(path))
@@ -994,7 +996,29 @@ def buy_item(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def pay_item(call):
-    bot.answer_callback_query(call.id, "支付接口准备中", show_alert=True)
+    if PAYMENT_WATCHER is None:
+        bot.answer_callback_query(call.id, "链上收款暂未配置，请联系客服。", show_alert=True)
+        return
+    prod_id = call.data[4:]
+    product = next((x for x in get_all_products() if str(x.get("id")) == prod_id), None)
+    if not product:
+        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
+        return
+    try:
+        order, payment_text = create_payment_order(
+            user_id=call.from_user.id, product=product,
+            load_orders=lambda: load_json_file(ORDERS_FILE, []),
+            save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+        )
+    except PaymentConfigurationError as exc:
+        bot.answer_callback_query(call.id, str(exc), show_alert=True)
+        return
+    except Exception as exc:
+        bot.answer_callback_query(call.id, "订单创建失败，请稍后重试或联系客服。", show_alert=True)
+        print("创建支付订单失败：", repr(exc), flush=True)
+        return
+    bot.answer_callback_query(call.id, "订单已创建")
+    bot.send_message(call.message.chat.id, payment_text, parse_mode="HTML", disable_web_page_preview=True)
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_orders")
 def show_orders(call):
@@ -1803,6 +1827,25 @@ if __name__ == "__main__":
         except Exception as report_exc:
             print("⚠️ 启动汇报发送失败，不影响机器人轮询：", repr(report_exc), flush=True)
         if archive_ready:
+            try:
+                PAYMENT_WATCHER = PaymentWatcher(
+                    load_orders=lambda: load_json_file(ORDERS_FILE, []),
+                    save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+                    on_payment=lambda order_id, transfer: handle_confirmed_payment(
+                        bot, order_id, transfer,
+                        load_orders=lambda: load_json_file(ORDERS_FILE, []),
+                        save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+                        admin_id=ADMIN_ID,
+                    ),
+                )
+                PAYMENT_WATCHER.start()
+                print("✅ TRC20 USDT 付款监听已启动", flush=True)
+            except PaymentConfigurationError as exc:
+                PAYMENT_WATCHER = None
+                print("⚠️ 链上收款未启动：", str(exc), flush=True)
+            except Exception as exc:
+                PAYMENT_WATCHER = None
+                print("⚠️ 链上收款启动失败，不影响机器人菜单：", repr(exc), flush=True)
             try:
                 archive_source_bundle()
             except Exception as archive_exc:
