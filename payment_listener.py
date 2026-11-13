@@ -24,7 +24,7 @@ TRONGRID_API_KEY = os.getenv("TRONGRID_API_KEY", "")
 TRON_RECEIVE_ADDRESS = os.getenv("TRON_RECEIVE_ADDRESS", "")
 USDT_CONTRACT = os.getenv(
     "TRON_USDT_CONTRACT",
-    "TR7NHqjeKQxGTCi8q8ZY4p4L8otSzgjLj6t"
+    "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 )
 USDT_DECIMALS = int(os.getenv("USDT_DECIMALS", "6"))
 POLL_INTERVAL_SECONDS = int(os.getenv("PAYMENT_POLL_SECONDS", "8"))
@@ -84,6 +84,31 @@ class TronGridClient:
             if not fingerprint or not payload["data"]:
                 break
         return all_rows
+
+    def is_solidified_success(self, txid):
+        """Require a successful receipt from TRON SolidityNode before crediting."""
+        url = f"{self.base_url}/walletsolidity/gettransactioninfobyid"
+        last_error = None
+        for attempt in range(4):
+            try:
+                response = self.session.post(
+                    url, json={"value": str(txid)}, timeout=REQUEST_TIMEOUT_SECONDS
+                )
+                if response.status_code == 429 or response.status_code >= 500:
+                    raise requests.HTTPError(f"TRON SolidityNode HTTP {response.status_code}", response=response)
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict) or not payload:
+                    return False
+                if payload.get("result") == "FAILED":
+                    return False
+                receipt = payload.get("receipt") or {}
+                return isinstance(receipt, dict) and receipt.get("result") == "SUCCESS"
+            except (requests.RequestException, ValueError) as exc:
+                last_error = exc
+                if attempt < 3:
+                    time.sleep(min(2 ** attempt, 20))
+        raise RuntimeError(f"TRON SolidityNode 连续查询失败：{last_error}") from last_error
 
     def _get_with_retry(self, url, params):
         last_error = None
@@ -262,6 +287,12 @@ class PaymentWatcher:
                     continue
 
                 possible = amount_index.get(raw_value, [])
+                if not possible:
+                    continue
+                # TronGrid's confirmed index is only a discovery signal. Require the
+                # solidified SolidityNode receipt before accepting funds or purchasing.
+                if not self.client.is_solidified_success(txid):
+                    continue
                 for order in possible:
                     created_ms = iso_to_ms(order["created_at"])
                     expires_ms = int(order["expires_at_ms"])
@@ -283,15 +314,22 @@ class PaymentWatcher:
                     # A transfer broadcast before the deadline may be indexed/confirmed
                     # after expiry. Its on-chain block timestamp decides whether it is timely.
                     if block_ms <= expires_ms and order.get("payment_status") in ("pending", "expired"):
-                        self.seen_txids.add(txid)
-                        self.on_payment(order["order_id"], transfer)
+                        # Only mark the transaction seen after the payment handler
+                        # has completed. If archive persistence or downstream handling
+                        # raises, the next poll must retry this same confirmed transfer.
+                        handled = self.on_payment(order["order_id"], transfer)
+                        if handled is not False:
+                            self.seen_txids.add(txid)
                         break
 
                     if block_ms > expires_ms and order.get("payment_status") == "expired":
-                        self.seen_txids.add(txid)
                         if self.on_late_payment:
-                            self.on_late_payment(order["order_id"], transfer)
+                            handled = self.on_late_payment(order["order_id"], transfer)
+                            if handled is not False:
+                                self.seen_txids.add(txid)
+                        else:
+                            # No late-payment handler: leave it uncredited and retryable.
+                            logger.warning("发现过期订单的链上到账，但未配置人工复核处理器：%s", order.get("order_id"))
                         break
             except Exception:
                 logger.exception("解析单笔链上转账失败")
-
