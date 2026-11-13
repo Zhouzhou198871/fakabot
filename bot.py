@@ -7,7 +7,7 @@ from products.catalog import (
     APPLE_PRODUCTS, TG_PRODUCTS, INSTAGRAM_PRODUCTS, AI_PRODUCTS, NODE_PRODUCTS,
     PRODUCT_CATALOGS, get_all_products,
 )
-from payment_flow import PaymentConfigurationError, PaymentWatcher, create_payment_order, handle_confirmed_payment
+from payment_flow import PaymentConfigurationError, PaymentWatcher, create_payment_order, create_payment_qr, handle_confirmed_payment
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
@@ -1018,7 +1018,7 @@ def pay_item(call):
         print("创建支付订单失败：", repr(exc), flush=True)
         return
     bot.answer_callback_query(call.id, "订单已创建")
-    bot.send_message(call.message.chat.id, payment_text, parse_mode="HTML", disable_web_page_preview=True)
+    bot.send_photo(call.message.chat.id, photo=create_payment_qr(os.getenv("TRON_RECEIVE_ADDRESS", "TTT5MV8xeZqKaPDxUcDjR8bPFz2ce5kmBr").strip()), caption=payment_text, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data == "ui_orders")
 def show_orders(call):
