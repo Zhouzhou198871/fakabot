@@ -322,4 +322,3 @@ def reconcile_pending_supplier_deliveries(
             continue
     return delivered_count
 
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
