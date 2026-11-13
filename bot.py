@@ -872,8 +872,8 @@ def show_brand_notice(call):
         if brand_name in social_catalogs:
             catalog_id, product_count, display_name = social_catalogs[brand_name]
             text = (
-                f"🏷️ <b>{html.escape(display_name)} 商品分类</b>\\n\\n"
-                f"📦 已登记商品：<b>{product_count} 种</b>\\n"
+                f"🏷️ <b>{html.escape(display_name)} 商品分类</b>\n\n"
+                f"📦 已登记商品：<b>{product_count} 种</b>\n"
                 "👇 点击下方进入完整商品列表，选择具体规格后再购买。"
             )
             kb.add(premium_button(
@@ -882,9 +882,9 @@ def show_brand_notice(call):
             ))
         else:
             text = (
-                f"🏷️ <b>{html.escape(brand_name)} 商品分类</b>\\n\\n"
-                "✅ 平台分类入口已开放。\\n"
-                "⏳ 当前仓库尚未录入该平台可核验的商品 SKU、价格和库存。\\n\\n"
+                f"🏷️ <b>{html.escape(brand_name)} 商品分类</b>\n\n"
+                "✅ 平台分类入口已开放。\n"
+                "⏳ 当前仓库尚未录入该平台可核验的商品 SKU、价格和库存。\n\n"
                 "为避免错价或无货订单，暂不开放购买；录入真实商品资料后会自动显示在这里。"
             )
             kb.add(premium_button("联系客服 / 提交商品资料", url="https://t.me/qingtian_Boss"))
@@ -897,8 +897,8 @@ def show_brand_notice(call):
 
     # Non-social brand groups keep their own explicit landing page.
     text = (
-        f"🏷️ <b>{html.escape(brand_name)}</b>\\n\\n"
-        "该平台目前尚未录入可核对的商品明细。\\n"
+        f"🏷️ <b>{html.escape(brand_name)}</b>\n\n"
+        "该平台目前尚未录入可核对的商品明细。\n"
         "为避免展示错误货号或价格，请联系客服确认上架信息。"
     )
     kb = types.InlineKeyboardMarkup(row_width=2)
