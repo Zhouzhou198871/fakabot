@@ -146,12 +146,15 @@ export default {
     headers.set("referer", ORIGIN + "/");
     headers.delete("cf-connecting-ip");
 
-    const upstream = await fetch(new Request(target.toString(), {
-      method: request.method,
-      headers,
-      body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-      redirect: "manual",
-    }));
+    const relayLogin = incoming.pathname === "/api/user/loginjwt" && request.method === "POST";
+    const upstream = await fetch(new Request(
+      relayLogin ? "https://api.lynli.me/_supplier/login" : target.toString(), {
+        method: request.method,
+        headers,
+        body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+        redirect: "manual",
+      }
+    ));
 
     if (incoming.pathname === "/api/user/loginjwt" && request.method === "POST" && upstream.ok) {
       try {
