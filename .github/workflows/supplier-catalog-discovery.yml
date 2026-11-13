@@ -85,7 +85,7 @@ jobs:
                               result["api_candidates"].append(s)
                   result["app_scripts"].append(entry)
           result["public_catalog_api"]=[]
-          for path in ("/api/syscategory/getcategorylist","/api/syssite/getsite","/api/sysproduct/getproductlist?categoryId=0","/api/sysproduct/getproductlist?categoryId=1"):
+          for path in ("/api/syscategory/getcategorylist","/api/syssite/getsite","/api/sysproduct/getproductlist?categoryId=0","/api/sysproduct/getproductlist?categoryId=1","/api/sysproduct/getproduct?productId=1510103661516505382"):
               x=get(urllib.parse.urljoin(BASE,path),2_000_000)
               body=x.pop("body","")
               entry={**x,"body_excerpt":body[:12000]}
