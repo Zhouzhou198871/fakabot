@@ -2,6 +2,22 @@ const ORIGIN = "https://dahaoshang.com";
 const PUBLIC_HOST = "auth.lynli.me";
 const SESSION_PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqQC4wdKepZunvRI8Ogj2\nqsTqtRaJOpO2fytiQi1tB1mQhz1SQ/Gr0pWlzfMNw3mO9qk4fBRygpOlVTijRNil\n5YOz1Ke7q5893bTtFaBWABjPP9+y+HzBe/jDvRNeJIyzqpPLkILXM9wf+hrca1GI\n/LT9dLNUfKe0zcxAPinHFdUGMD7ra+Dk9BJ/NwrJ4pt4UWUX2l59LT730NMsKskJ\ntmJMaBLpwTCJZYGuPEjiBRX9tGv1BZ1gusBBLSrpxMScINSHK6Jv7d7cjg7JYUDL\n6+BUJbaYP+IqAcRPtT397/hjbRBBoralHP7lpDSoABgFHTj23wz1zBPCPy2iFlxm\n5QIDAQAB\n-----END PUBLIC KEY-----";
 
+const SPA_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>大号商 - 专业账号购买与账号出售平台</title>
+<link rel="icon" href="/logo.png" type="image/x-icon">
+<link rel="stylesheet" href="/assets/index-6pebbnt6.css">
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/assets/index-koqdjogt.js"></script>
+</body>
+</html>`;
+
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
@@ -79,6 +95,18 @@ export default {
   async fetch(request, env) {
     const incoming = new URL(request.url);
 
+    const isSpaRoute = request.method === "GET" &&
+      !incoming.pathname.startsWith("/api/") &&
+      !incoming.pathname.startsWith("/assets/") &&
+      !incoming.pathname.startsWith("/_internal_") &&
+      !/\\.[a-zA-Z0-9]{1,8}$/.test(incoming.pathname);
+    if (isSpaRoute) {
+      return new Response(SPA_HTML, { headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      }});
+    }
     if (incoming.pathname === "/_proxy_health") {
       return new Response("auth proxy online", { headers: { "cache-control": "no-store" } });
     }
