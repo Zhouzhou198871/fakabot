@@ -11,12 +11,17 @@ class PaymentFlowTests(unittest.TestCase):
     def save(self, rows):
         self.orders = [dict(x) for x in rows]
 
+    def test_unverified_product_is_blocked_before_payment_order_creation(self):
+        with self.assertRaisesRegex(Exception, "上游核价与采购验证"):
+            create_payment_order(101, {"id":"p1","name":"商品","price":"2.00","supplier_verified":False}, self.load, self.save)
+        self.assertEqual(self.orders, [])
+
     def test_order_uses_unique_exact_six_decimal_amount(self):
         import os
         old = os.environ.get("TRON_RECEIVE_ADDRESS")
         os.environ["TRON_RECEIVE_ADDRESS"] = "T" + "A" * 33
         try:
-            first, _ = create_payment_order(101, {"id":"p1","name":"商品","price":"2.00"}, self.load, self.save)
+            first, _ = create_payment_order(101, {"id":"p1","name":"商品","price":"2.00","supplier_verified":True}, self.load, self.save)
             second, _ = create_payment_order(102, {"id":"p1","name":"商品","price":"2.00"}, self.load, self.save)
             self.assertNotEqual(first["amount_raw"], second["amount_raw"])
             self.assertEqual(len(first["amount_raw"]), len(str(int(float(first["amount"]) * 1000000))))
