@@ -160,7 +160,7 @@ export default {
       try {
         const payload = await upstream.clone().json();
         const token = payload?.Data?.access_token;
-        if (payload?.Code === 200 && typeof token === "string" && token.length > 20) {
+        if (typeof token === "string" && token.length > 20) {
           await persistSession(token, env);
         }
       } catch (error) {
