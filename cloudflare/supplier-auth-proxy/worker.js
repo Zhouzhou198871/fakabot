@@ -148,7 +148,7 @@ export default {
 
     const relayLogin = incoming.pathname === "/api/user/loginjwt" && request.method === "POST";
     const upstream = await fetch(new Request(
-      relayLogin ? "https://api.lynli.me/_supplier/login" : target.toString(), {
+      relayLogin ? "http://relay.lynli.me/_supplier/login" : target.toString(), {
         method: request.method,
         headers,
         body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
