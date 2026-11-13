@@ -2,6 +2,10 @@ name: Supplier catalog discovery
 on:
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/supplier-catalog-discovery.yml"
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 permissions:
   contents: write
