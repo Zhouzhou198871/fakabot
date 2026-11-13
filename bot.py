@@ -999,4 +999,3 @@ def buy_item(call):
         kb.add(premium_button("联系客服", url="https://t.me/qingtian_Boss"))
         kb.add(premium_button("返回列表", callback_data=f"products_{back_cat}_{return_page}"))
 
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
