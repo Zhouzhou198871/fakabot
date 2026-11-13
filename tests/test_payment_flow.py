@@ -17,7 +17,7 @@ class PaymentFlowTests(unittest.TestCase):
         self.assertEqual(self.orders, [])
 
     def test_verified_catalog_without_ready_procurement_is_blocked(self):
-        product = {"id":"p1","name":"商品","price":"2.00","supplier_verified":True,"procurement_ready":True,"supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100","supplier_price_cny":"8.00"}
+        product = {"id":"p1","name":"商品","price":"2.00","supplier_verified":True,"procurement_ready":False,"supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100","supplier_price_cny":"8.00"}
         with self.assertRaisesRegex(Exception, "自动采购验证"):
             create_payment_order(101, product, self.load, self.save)
         self.assertEqual(self.orders, [])
@@ -38,8 +38,9 @@ class PaymentFlowTests(unittest.TestCase):
         old = os.environ.get("TRON_RECEIVE_ADDRESS")
         os.environ["TRON_RECEIVE_ADDRESS"] = "T" + "A" * 33
         try:
-            first, _ = create_payment_order(101, {"id":"p1","name":"商品","price":"2.00","supplier_verified":True}, self.load, self.save)
-            second, _ = create_payment_order(102, {"id":"p1","name":"商品","price":"2.00","supplier_verified":True}, self.load, self.save)
+            product = {"id":"p1","name":"商品","price":"2.00","supplier_verified":True,"procurement_ready":True,"supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100","supplier_price_cny":"8.00"}
+            first, _ = create_payment_order(101, product, self.load, self.save)
+            second, _ = create_payment_order(102, product, self.load, self.save)
             self.assertNotEqual(first["amount_raw"], second["amount_raw"])
             self.assertEqual(len(first["amount_raw"]), len(str(int(float(first["amount"]) * 1000000))))
             self.assertEqual(first["payment_status"], "pending")
