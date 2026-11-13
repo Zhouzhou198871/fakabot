@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from telebot import types
 from products.catalog import (
     APPLE_PRODUCTS, TG_PRODUCTS, INSTAGRAM_PRODUCTS, AI_PRODUCTS, NODE_PRODUCTS,
-    PRODUCT_CATALOGS, get_all_products,
+    PRODUCT_CATALOGS, UPSTREAM_CATEGORIES, UPSTREAM_CATEGORY_BY_KEY, get_all_products,
 )
 from payment_flow import PaymentConfigurationError, PaymentWatcher, create_payment_order, create_payment_qr, handle_confirmed_payment
 
@@ -539,11 +539,19 @@ BRAND_GROUPS = {
 
 def get_account_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.row(premium_button("苹果 ID", callback_data="list_apple"), premium_button("TG 账号", callback_data="list_tg"))
-    kb.row(premium_button("AI 专区", callback_data="list_ai"), premium_button("社交账号", callback_data="brands_social"))
-    kb.row(premium_button("邮箱账号", callback_data="brands_email"), premium_button("视频账号", callback_data="brands_video"))
-    kb.row(premium_button("通讯账号", callback_data="brands_communication"), premium_button("电商账号", callback_data="brands_commerce"))
-    kb.row(premium_button("节点套餐", callback_data="list_node"), premium_button("返回主菜单", callback_data="ui_buy"))
+    buttons = [
+        premium_button(
+            f"{category.get('display_icon', '🛍️')} {category.get('name', '商品')} ({category.get('product_count', 0)})",
+            callback_data=f"list_{category['key']}"
+        )
+        for category in UPSTREAM_CATEGORIES
+    ]
+    for index in range(0, len(buttons), 2):
+        kb.row(*buttons[index:index + 2])
+    kb.row(
+        premium_button("🌐 节点套餐", callback_data="list_node"),
+        premium_button("返回主菜单", callback_data="ui_buy")
+    )
     return kb
 
 def get_brand_group_kb(group_id):
@@ -582,6 +590,13 @@ def get_product_page_text(cat_id, page=0):
         "commerce": ("🛒", "电商账号专区", "选择需要的电商平台账号类别。"),
         "node": ("🌐", "节点套餐专区", "按流量和使用需求选择套餐；购买前请确认套餐规格。"),
     }
+    upstream_category = UPSTREAM_CATEGORY_BY_KEY.get(cat_id)
+    if upstream_category:
+        titles[cat_id] = (
+            upstream_category.get("display_icon", "🛍️"),
+            upstream_category.get("name", "商品专区"),
+            "大号商实时商品目录。价格按人民币采购价 ÷ 4 换算为 USDT 展示；上游自动采购尚未完成验证，当前仅供浏览。"
+        )
     icon, title, intro = titles.get(cat_id, ("🛍️", "商品专区", "请选择适合您的商品。"))
     first = page * 8 + 1 if total else 0
     last = min((page + 1) * 8, total)
@@ -609,7 +624,11 @@ def get_products_kb(cat_id, page=0):
         "email": "✉️", "video": "🎬", "communication": "💬",
         "commerce": "🛒", "node": "🌐"
     }
-    product_icon = product_icons.get(cat_id, "🛍️")
+    upstream_category = UPSTREAM_CATEGORY_BY_KEY.get(cat_id)
+    product_icon = (
+        upstream_category.get("display_icon", "🛍️")
+        if upstream_category else product_icons.get(cat_id, "🛍️")
+    )
     if cat_id in BRAND_GROUPS:
         brand_buttons = [
             premium_button(
@@ -623,7 +642,10 @@ def get_products_kb(cat_id, page=0):
     else:
         for product_index, product in enumerate(selected, start=page * 8 + 1):
             callback = f"buy_{product['id']}_{page}"
-            label = f"{product_icon} {product_index}. {product['name']} | {product['price']} U"
+            product_name = str(product.get("name", "商品"))
+            if len(product_name) > 52:
+                product_name = product_name[:49] + "…"
+            label = f"{product_icon} {product_index}. {product_name} | {product['price']} U"
             kb.add(premium_button(label, callback_data=callback))
     if not selected:
         kb.add(premium_button("暂无已登记商品", callback_data="show_support"))
@@ -937,7 +959,7 @@ def show_product_page(call):
         page = int(parts[2])
     except ValueError:
         page = 0
-    if cat_id not in ("apple", "tg", "instagram", "ai", "social", "email", "video", "communication", "commerce", "node"):
+    if cat_id not in PRODUCT_CATALOGS and cat_id not in BRAND_GROUPS:
         bot.answer_callback_query(call.id, "商品分类不存在。", show_alert=True)
         return
     safe_edit(
@@ -960,6 +982,24 @@ def buy_item(call):
         bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
         return
     bot.answer_callback_query(call.id)
+
+    if p.get("is_upstream"):
+        detail = (
+            f"{p.get('display_icon', '🛍️')} <b>{html.escape(p['name'])}</b>\\n"
+            f"💴 上游标价：<code>{p.get('price_cny', '—')} CNY</code>\\n"
+            f"💰 展示售价：<code>{p['price']} USDT</code>\\n"
+            f"📦 上游库存快照：<code>{p.get('supplier_stock', 0)}</code>\\n"
+            f"🆔 货号：<code>{html.escape(str(p.get('supplier_product_id', prod_id)))}</code>\\n\\n"
+            "⚠️ 商品已从大号商公开商品接口抓取；自动登录采购和卡密交付尚未验证，暂不收款。"
+        )
+        back_cat = p.get("category_key", "up0")
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        if p.get("supplier_url"):
+            kb.add(premium_button("查看上游商品", url=p["supplier_url"]))
+        kb.add(premium_button("联系客服", url="https://t.me/qingtian_Boss"))
+        kb.add(premium_button("返回列表", callback_data=f"products_{back_cat}_{return_page}"))
+        safe_edit(bot, call.message.chat.id, call.message.message_id, detail, kb)
+        return
 
     if prod_id.startswith("ai"):
         detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>{p['price']} U</code>\n\n👇 <i>点击下方【在线支付】全自动发货</i>"
@@ -1003,6 +1043,9 @@ def pay_item(call):
     product = next((x for x in get_all_products() if str(x.get("id")) == prod_id), None)
     if not product:
         bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
+        return
+    if product.get("is_upstream") and not product.get("procurement_ready"):
+        bot.answer_callback_query(call.id, "该上游商品尚未完成自动采购验证，暂不收款。", show_alert=True)
         return
     try:
         order, payment_text = create_payment_order(
