@@ -12,8 +12,25 @@ class PaymentFlowTests(unittest.TestCase):
         self.orders = [dict(x) for x in rows]
 
     def test_unverified_product_is_blocked_before_payment_order_creation(self):
-        with self.assertRaisesRegex(Exception, "上游核价与采购验证"):
+        with self.assertRaisesRegex(Exception, "自动采购验证"):
             create_payment_order(101, {"id":"p1","name":"商品","price":"2.00","supplier_verified":False}, self.load, self.save)
+        self.assertEqual(self.orders, [])
+
+    def test_verified_catalog_without_ready_procurement_is_blocked(self):
+        product = {"id":"p1","name":"商品","price":"2.00","supplier_verified":True,"procurement_ready":True,"supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100","supplier_price_cny":"8.00"}
+        with self.assertRaisesRegex(Exception, "自动采购验证"):
+            create_payment_order(101, product, self.load, self.save)
+        self.assertEqual(self.orders, [])
+
+    def test_supplier_cost_must_match_two_x_markup(self):
+        product = {
+            "id":"p1","name":"商品","price":"2.01",
+            "supplier_verified":True,"procurement_ready":True,
+            "supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100",
+            "supplier_price_cny":"8.00"
+        }
+        with self.assertRaisesRegex(Exception, "利润规则不一致"):
+            create_payment_order(101, product, self.load, self.save)
         self.assertEqual(self.orders, [])
 
     def test_order_uses_unique_exact_six_decimal_amount(self):
