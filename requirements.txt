@@ -4,4 +4,4 @@ qrcode[pil]>=7.4.2,<9.0.0
 
 cryptography>=42,<47
 
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
+Telethon>=1.45.0,<2.0.0
