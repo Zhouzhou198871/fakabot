@@ -128,6 +128,8 @@ class DahaoshangClient:
         quantity = int(quantity)
         if quantity < 1:
             raise ValueError("quantity 必须大于 0")
+        # Validate the bearer session before any purchase-related request.
+        self.get_user_info()
         product = self.get_product(product_id)
         if product.get("IsOnSale") is not True:
             raise SupplierError("上游商品当前未上架，拒绝采购。")

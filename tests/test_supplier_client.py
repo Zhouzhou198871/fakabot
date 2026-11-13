@@ -61,14 +61,15 @@ class SupplierClientTests(unittest.TestCase):
             {"Text": "USDT(TRC20)", "Value": "115"},
             {"Text": "支付宝", "Value": "97"},
         ]}
-        client, http = self.make_client([product, methods])
+        client, http = self.make_client([{"Code": 200, "Data": {"UserId": 1}}, product, methods])
         with self.assertRaisesRegex(SupplierError, "账户余额支付方式"):
             client.buy_with_balance("P1")
-        self.assertEqual(len(http.calls), 2)
+        self.assertEqual(len(http.calls), 3)
         self.assertNotIn("/api/sysorder/buy", [c[1] for c in http.calls])
 
     def test_buy_uses_confirmed_payload_and_reads_content(self):
         responses = [
+            {"Code": 200, "Data": {"UserId": 1}},
             {"Code": 200, "Data": {
                 "ID": "P1", "CategoryId": "C1", "IsOnSale": True,
                 "InStock": 5, "ProductModels": [{"ID": "M1", "Qty": 5}],
@@ -93,13 +94,14 @@ class SupplierClientTests(unittest.TestCase):
             "InStock": 10,
             "ProductModels": [{"ID": "M1", "Qty": 5}, {"ID": "M2", "Qty": 5}],
         }}
-        client, http = self.make_client([product])
+        client, http = self.make_client([{"Code": 200, "Data": {"UserId": 1}}, product])
         with self.assertRaisesRegex(SupplierError, "多个规格"):
             client.buy_with_balance("P1")
-        self.assertEqual(len(http.calls), 1)
+        self.assertEqual(len(http.calls), 2)
 
     def test_missing_order_content_is_not_marked_delivered(self):
         responses = [
+            {"Code": 200, "Data": {"UserId": 1}},
             {"Code": 200, "Data": {
                 "ID": "P1", "CategoryId": "C1", "IsOnSale": True,
                 "InStock": 1, "ProductModels": [],
