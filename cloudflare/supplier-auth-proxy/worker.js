@@ -52,13 +52,6 @@ async function encryptSessionToken(token) {
     wrapped_key: base64(new Uint8Array(wrappedKey)),
   };
 }
-function parseExpiry(value) {
-  if (!value) return null;
-  const direct = Date.parse(value);
-  if (Number.isFinite(direct)) return direct;
-  const legacy = Date.parse(String(value).replace(" ", "T") + "Z");
-  return Number.isFinite(legacy) ? legacy : null;
-}
 function tokenExpiry(token) {
   try {
     const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -106,7 +99,6 @@ export default {
       !incoming.pathname.startsWith("/api/") &&
       !incoming.pathname.startsWith("/assets/") &&
       !incoming.pathname.startsWith("/_internal_") &&
-      !incoming.pathname.startsWith("/_internal/") &&
       incoming.pathname !== "/_proxy_health" &&
       !/\\.[a-zA-Z0-9]{1,8}$/.test(incoming.pathname);
     if (isSpaRoute) {
@@ -121,12 +113,10 @@ export default {
     }
     if (incoming.pathname === "/_internal_session_status") {
       const row = await env.DB.prepare(
-        "SELECT status, expires_at, encrypted_state, updated_at FROM supplier_sessions WHERE id = ?",
+        "SELECT status, expires_at, updated_at FROM supplier_sessions WHERE id = ?",
       ).bind("dahaoshang-primary").first();
-      const expiry = parseExpiry(row?.expires_at);
       const usable = row?.status === "authorized" &&
-        typeof row.encrypted_state === "string" && row.encrypted_state.length > 0 &&
-        (expiry === null || expiry > Date.now());
+        (!row.expires_at || Date.parse(row.expires_at.replace(" ", "T") + "Z") > Date.now());
       return json({
         provider: "dahaoshang", status: row?.status || "not_connected",
         expires_at: row?.expires_at || null, usable: Boolean(usable),
@@ -136,9 +126,8 @@ export default {
       const row = await env.DB.prepare(
         "SELECT status, expires_at, encrypted_state FROM supplier_sessions WHERE id = ?",
       ).bind("dahaoshang-primary").first();
-      const expiry = parseExpiry(row?.expires_at);
-      if (!row || row.status !== "authorized" || !row.encrypted_state ||
-          (expiry !== null && expiry <= Date.now())) {
+      if (!row || row.status !== "authorized" ||
+          (row.expires_at && Date.parse(row.expires_at.replace(" ", "T") + "Z") <= Date.now())) {
         return json({ ok: false, error: "supplier_session_unavailable" }, 409);
       }
       try {
@@ -146,10 +135,6 @@ export default {
       } catch {
         return json({ ok: false, error: "session_data_invalid" }, 503);
       }
-    }
-    if (incoming.pathname === "/_internal_login_diagnostic") {
-      const row = await env.DB.prepare("SELECT attempted_at, http_status, payload_code, message, data_keys, token_present, token_length, response_bytes FROM supplier_login_diagnostics ORDER BY id DESC LIMIT 1").first();
-      return json({ latest: row || null });
     }
     if (incoming.pathname === "/_internal_probe") return json(await probe(env));
 
@@ -171,17 +156,16 @@ export default {
       redirect: "manual",
     }));
 
-    if (incoming.pathname === "/api/user/loginjwt" && request.method === "POST") {
+    if (incoming.pathname === "/api/user/loginjwt" && request.method === "POST" && upstream.ok) {
       try {
-        const raw = await upstream.clone().text();
-        let payload = null;
-        try { payload = JSON.parse(raw); } catch {}
+        const payload = await upstream.clone().json();
         const token = payload?.Data?.access_token;
-        const dataKeys = payload?.Data && typeof payload.Data === "object" ? Object.keys(payload.Data).join(",").slice(0, 500) : "";
-        const message = typeof payload?.Message === "string" ? payload.Message.slice(0, 120) : Array.isArray(payload?.Message) ? payload.Message.join("; ").slice(0, 120) : "";
-        await env.DB.prepare("INSERT INTO supplier_login_diagnostics (attempted_at, http_status, payload_code, message, data_keys, token_present, token_length, response_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(new Date().toISOString(), upstream.status, payload?.Code == null ? null : String(payload.Code).slice(0, 32), message, dataKeys, typeof token === "string" ? 1 : 0, typeof token === "string" ? token.length : 0, new TextEncoder().encode(raw).length).run();
-        if (typeof token === "string" && token.length > 20) await persistSession(token, env);
-      } catch (error) { console.error("supplier login capture failed", String(error).slice(0, 100)); }
+        if (payload?.Code === 200 && typeof token === "string" && token.length > 20) {
+          await persistSession(token, env);
+        }
+      } catch (error) {
+        console.error("supplier session persistence failed", String(error).slice(0, 100));
+      }
     }
     if (incoming.pathname === "/api/user/logout" && request.method === "POST") {
       await env.DB.prepare(
