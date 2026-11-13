@@ -52,6 +52,13 @@ async function encryptSessionToken(token) {
     wrapped_key: base64(new Uint8Array(wrappedKey)),
   };
 }
+function parseExpiry(value) {
+  if (!value) return null;
+  const direct = Date.parse(value);
+  if (Number.isFinite(direct)) return direct;
+  const legacy = Date.parse(String(value).replace(" ", "T") + "Z");
+  return Number.isFinite(legacy) ? legacy : null;
+}
 function tokenExpiry(token) {
   try {
     const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -113,10 +120,12 @@ export default {
     }
     if (incoming.pathname === "/_internal_session_status") {
       const row = await env.DB.prepare(
-        "SELECT status, expires_at, updated_at FROM supplier_sessions WHERE id = ?",
+        "SELECT status, expires_at, encrypted_state, updated_at FROM supplier_sessions WHERE id = ?",
       ).bind("dahaoshang-primary").first();
+      const expiry = parseExpiry(row?.expires_at);
       const usable = row?.status === "authorized" &&
-        (!row.expires_at || Date.parse(row.expires_at.replace(" ", "T") + "Z") > Date.now());
+        typeof row.encrypted_state === "string" && row.encrypted_state.length > 0 &&
+        (expiry === null || expiry > Date.now());
       return json({
         provider: "dahaoshang", status: row?.status || "not_connected",
         expires_at: row?.expires_at || null, usable: Boolean(usable),
@@ -126,8 +135,9 @@ export default {
       const row = await env.DB.prepare(
         "SELECT status, expires_at, encrypted_state FROM supplier_sessions WHERE id = ?",
       ).bind("dahaoshang-primary").first();
-      if (!row || row.status !== "authorized" ||
-          (row.expires_at && Date.parse(row.expires_at.replace(" ", "T") + "Z") <= Date.now())) {
+      const expiry = parseExpiry(row?.expires_at);
+      if (!row || row.status !== "authorized" || !row.encrypted_state ||
+          (expiry !== null && expiry <= Date.now())) {
         return json({ ok: false, error: "supplier_session_unavailable" }, 409);
       }
       try {
