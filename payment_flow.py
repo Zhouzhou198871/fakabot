@@ -15,8 +15,13 @@ ORDER_TTL_SECONDS = max(300, int(os.getenv("PAYMENT_ORDER_TTL_SECONDS", "1200"))
 def create_payment_order(user_id, product, load_orders, save_orders):
     # Never accept customer funds for catalog rows that have not been verified
     # against the live supplier catalog and procurement path.
-    if product.get("supplier_verified") is not True:
-        raise PaymentConfigurationError("该商品尚未完成上游核价与采购验证，暂不接受付款。")
+    if (
+        product.get("supplier_verified") is not True
+        or product.get("procurement_ready") is not True
+        or not str(product.get("supplier_product_id") or "").strip()
+        or not str(product.get("supplier_url") or "").strip()
+    ):
+        raise PaymentConfigurationError("该商品尚未完成上游商品核验与自动采购验证，暂不接受付款。")
     receive_address = os.getenv("TRON_RECEIVE_ADDRESS", "TTT5MV8xeZqKaPDxUcDjR8bPFz2ce5kmBr").strip()
     if not receive_address:
         raise PaymentConfigurationError("收款地址尚未配置，请联系客服。")
@@ -26,6 +31,13 @@ def create_payment_order(user_id, product, load_orders, save_orders):
         raise PaymentConfigurationError("商品价格配置无效，请联系客服。")
     if not base.is_finite() or base <= 0:
         raise PaymentConfigurationError("商品价格配置无效，请联系客服。")
+    try:
+        supplier_cost = Decimal(str(product.get("supplier_price_cny"))).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        raise PaymentConfigurationError("上游采购成本未核实，暂不接受付款。")
+    expected_sell_price = (supplier_cost / Decimal("4")).quantize(Decimal("0.01"))
+    if not supplier_cost.is_finite() or supplier_cost <= 0 or base != expected_sell_price:
+        raise PaymentConfigurationError("商品售价与上游人民币成本及利润规则不一致，暂不接受付款。")
     with _lock:
         orders = load_orders()
         if not isinstance(orders, list): raise RuntimeError("订单归档格式错误")
