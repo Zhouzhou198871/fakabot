@@ -5,6 +5,7 @@ Only use a verified local session file. Purchase is deliberately balance-only:
 the client refuses to create an order if the supplier does not expose a usable
 account-balance payment method. It never signs or broadcasts cryptocurrency.
 """
+import base64
 import json
 import os
 import stat
@@ -35,21 +36,71 @@ class DahaoshangClient:
         self._load_session()
 
     def _load_session(self):
-        if not self.session_file.is_file():
-            raise SupplierError("缺少大号商登录会话；请先完成本机安全登录验证。")
-        mode = stat.S_IMODE(self.session_file.stat().st_mode)
-        if mode & 0o077:
-            raise SupplierError("大号商会话文件权限过宽，拒绝读取。")
-        try:
-            payload = json.loads(self.session_file.read_text(encoding="utf-8"))
-        except Exception as exc:
-            raise SupplierError("大号商会话文件无法解析。") from exc
-        token = payload.get("access_token") if isinstance(payload, dict) else None
-        base = payload.get("base_url", BASE_URL) if isinstance(payload, dict) else BASE_URL
+        token = None
+        if self.session_file.is_file():
+            mode = stat.S_IMODE(self.session_file.stat().st_mode)
+            if mode & 0o077:
+                raise SupplierError("大号商会话文件权限过宽，拒绝读取。")
+            try:
+                payload = json.loads(self.session_file.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise SupplierError("大号商会话文件无法解析。") from exc
+            token = payload.get("access_token") if isinstance(payload, dict) else None
+            base = payload.get("base_url", BASE_URL) if isinstance(payload, dict) else BASE_URL
+            if base.rstrip("/") != BASE_URL:
+                raise SupplierError("会话目标站点与固定上游地址不一致，拒绝请求。")
+        else:
+            session_url = os.getenv("SUPPLIER_SESSION_URL", "").strip()
+            private_key_path = Path(os.getenv(
+                "SUPPLIER_SESSION_PRIVATE_KEY",
+                "/root/.config/fakabot/supplier_session_private.pem",
+            ))
+            if not session_url:
+                raise SupplierError("缺少大号商登录会话；请先完成本机安全登录验证。")
+            try:
+                response = requests.get(session_url, timeout=self.timeout)
+                response.raise_for_status()
+                remote = response.json()
+                encrypted = remote.get("encrypted_state") if isinstance(remote, dict) else None
+                if not remote.get("ok") or not isinstance(encrypted, dict):
+                    raise SupplierError("大号商网页登录授权尚未完成或已过期。")
+                expires_at = remote.get("expires_at")
+                if expires_at:
+                    from datetime import datetime, timezone
+                    expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                    if expiry <= datetime.now(timezone.utc):
+                        raise SupplierError("大号商网页登录会话已过期，请重新授权。")
+                if not private_key_path.is_file():
+                    raise SupplierError("服务器缺少会话解密私钥。")
+                from cryptography.hazmat.primitives import hashes, serialization
+                from cryptography.hazmat.primitives.asymmetric import padding
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                private_key = serialization.load_pem_private_key(
+                    private_key_path.read_bytes(), password=None
+                )
+                aes_key = private_key.decrypt(
+                    base64.b64decode(encrypted["wrapped_key"]),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None,
+                    ),
+                )
+                token_bytes = AESGCM(aes_key).decrypt(
+                    base64.b64decode(encrypted["iv"]),
+                    base64.b64decode(encrypted["ciphertext"]),
+                    None,
+                )
+                token = token_bytes.decode("utf-8")
+            except SupplierError:
+                raise
+            except Exception as exc:
+                raise SupplierError("无法安全恢复大号商网页登录会话。") from exc
+
         if not isinstance(token, str) or not token.strip():
             raise SupplierError("大号商会话中没有有效令牌。")
-        if base.rstrip("/") != BASE_URL:
-            raise SupplierError("会话目标站点与固定上游地址不一致，拒绝请求。")
         self.base_url = BASE_URL
         self.http.headers.update({
             "Accept": "application/json, text/plain, */*",
@@ -57,6 +108,7 @@ class DahaoshangClient:
             "Authorization": "Bearer " + token.strip(),
             "User-Agent": "Mozilla/5.0 (compatible; FakabotSupplierConnector/1.0)",
         })
+
 
     def _request(self, method, path, *, params=None, body=None):
         try:
@@ -192,3 +244,5 @@ class DahaoshangClient:
             "content": content,
             "supplier_status": order.get("ShipStatus"),
         }
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
