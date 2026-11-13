@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from supplier_client import DahaoshangClient, SupplierError, SupplierDeliveryPending
@@ -116,5 +117,102 @@ class SupplierClientTests(unittest.TestCase):
         self.assertEqual(caught.exception.order_id, "O1")
 
 
+    def test_recovers_encrypted_remote_session_without_writing_plaintext(self):
+        from datetime import datetime, timedelta, timezone
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        import base64
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        with tempfile.TemporaryDirectory() as directory:
+            private_path = Path(directory) / "session-private.pem"
+            private_path.write_bytes(private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ))
+            os.chmod(private_path, 0o600)
+            aes_key = os.urandom(32)
+            iv = os.urandom(12)
+            token = "test-remote-encrypted-token"
+            ciphertext = AESGCM(aes_key).encrypt(iv, token.encode(), None)
+            wrapped = private_key.public_key().encrypt(
+                aes_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None,
+                ),
+            )
+            payload = {
+                "ok": True,
+                "encrypted_state": {
+                    "v": 1,
+                    "alg": "RSA-OAEP-256+A256GCM",
+                    "iv": base64.b64encode(iv).decode(),
+                    "ciphertext": base64.b64encode(ciphertext).decode(),
+                    "wrapped_key": base64.b64encode(wrapped).decode(),
+                },
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            }
+            http = FakeHTTP([{"Code": 200, "Data": {"UserId": 7}}])
+            remote = FakeResponse(payload)
+            old_url = os.environ.get("SUPPLIER_SESSION_URL")
+            old_key = os.environ.get("SUPPLIER_SESSION_PRIVATE_KEY")
+            os.environ["SUPPLIER_SESSION_URL"] = "https://auth.example.test/_internal/session"
+            os.environ["SUPPLIER_SESSION_PRIVATE_KEY"] = str(private_path)
+            try:
+                with patch("supplier_client.requests.get", return_value=remote) as get:
+                    client = DahaoshangClient(
+                        Path(directory) / "missing-session.json", http=http
+                    )
+                    self.assertEqual(client.get_user_info()["UserId"], 7)
+                    self.assertEqual(http.headers["Authorization"], "Bearer " + token)
+                    get.assert_called_once()
+                self.assertFalse((Path(directory) / "missing-session.json").exists())
+            finally:
+                if old_url is None:
+                    os.environ.pop("SUPPLIER_SESSION_URL", None)
+                else:
+                    os.environ["SUPPLIER_SESSION_URL"] = old_url
+                if old_key is None:
+                    os.environ.pop("SUPPLIER_SESSION_PRIVATE_KEY", None)
+                else:
+                    os.environ["SUPPLIER_SESSION_PRIVATE_KEY"] = old_key
+
+    def test_rejects_expired_remote_session(self):
+        from datetime import datetime, timedelta, timezone
+        payload = {
+            "ok": True,
+            "encrypted_state": {},
+            "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        }
+        old_url = os.environ.get("SUPPLIER_SESSION_URL")
+        old_key = os.environ.get("SUPPLIER_SESSION_PRIVATE_KEY")
+        with tempfile.TemporaryDirectory() as directory:
+            key_path = Path(directory) / "private.pem"
+            key_path.write_text("unused", encoding="utf-8")
+            os.chmod(key_path, 0o600)
+            os.environ["SUPPLIER_SESSION_URL"] = "https://auth.example.test/_internal/session"
+            os.environ["SUPPLIER_SESSION_PRIVATE_KEY"] = str(key_path)
+            try:
+                with patch("supplier_client.requests.get", return_value=FakeResponse(payload)):
+                    with self.assertRaisesRegex(SupplierError, "已过期"):
+                        DahaoshangClient(Path(directory) / "missing.json")
+            finally:
+                if old_url is None:
+                    os.environ.pop("SUPPLIER_SESSION_URL", None)
+                else:
+                    os.environ["SUPPLIER_SESSION_URL"] = old_url
+                if old_key is None:
+                    os.environ.pop("SUPPLIER_SESSION_PRIVATE_KEY", None)
+                else:
+                    os.environ["SUPPLIER_SESSION_PRIVATE_KEY"] = old_key
+
+
+
 if __name__ == "__main__":
     unittest.main()
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
