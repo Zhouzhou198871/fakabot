@@ -250,4 +250,3 @@ class DahaoshangClient:
         result["supplier_order_no"] = str(entity.get("OrderNo") or data.get("OrderNo") or "")
         return result
 
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
