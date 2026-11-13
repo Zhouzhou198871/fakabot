@@ -71,6 +71,11 @@ jobs:
                           found += re.findall(pat,body,re.I)
                       entry["interesting_strings"]=list(dict.fromkeys(found))[:160]
                       entry["keyword_hits"]={k:len(re.findall(k,body,re.I)) for k in ("axios","baseURL","/api","product","goods","catalog","login","graphql","Authorization")}
+                      snippets=[]
+                      for needle in ("baseURL","axios.create","/api/","Authorization","productList","getProducts","products"):
+                          for m in list(re.finditer(re.escape(needle),body,re.I))[:12]:
+                              snippets.append({"needle":needle,"context":body[max(0,m.start()-350):min(len(body),m.end()+500)]})
+                      entry["code_contexts"]=snippets[:100]
                       entry["js_excerpt"]=body[:500] if not found else ""
                       for s in found:
                           if s.startswith("/") and not s.startswith("//") and re.search(r"(api|product|goods|catalog|login)",s,re.I):
