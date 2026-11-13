@@ -138,5 +138,38 @@ class PaymentFlowTests(unittest.TestCase):
             if old is None: os.environ.pop("SUPPLIER_AUTOPROCUREMENT_ENABLED", None)
             else: os.environ["SUPPLIER_AUTOPROCUREMENT_ENABLED"] = old
 
+
+    def test_pending_supplier_order_is_reconciled_without_repurchase(self):
+        from payment_flow import reconcile_pending_supplier_deliveries
+        class FakeSupplier:
+            def __init__(self): self.reads = []; self.purchases = 0
+            def get_order(self, order_id):
+                self.reads.append(order_id)
+                return {"supplier_order_id": order_id, "content": "recovered-delivery", "supplier_status": "已发货"}
+            def buy_with_balance(self, *args, **kwargs):
+                self.purchases += 1
+                raise AssertionError("reconciliation must never buy again")
+        class FakeBot:
+            def __init__(self): self.messages = []
+            def send_message(self, *args, **kwargs): self.messages.append((args, kwargs))
+        supplier, bot = FakeSupplier(), FakeBot()
+        self.orders = [{
+            "order_id": "QT-RECOVER-1", "user_id": "1", "payment_status": "paid",
+            "status": "paid", "procurement_status": "supplier_order_pending_delivery",
+            "supplier_order_id": "UP-EXISTING-1",
+        }]
+        count = reconcile_pending_supplier_deliveries(
+            bot, self.load, self.save, supplier_client_factory=lambda: supplier,
+        )
+        self.assertEqual(count, 1)
+        self.assertEqual(supplier.reads, ["UP-EXISTING-1"])
+        self.assertEqual(supplier.purchases, 0)
+        self.assertEqual(self.orders[0]["procurement_status"], "delivered")
+        self.assertEqual(self.orders[0]["delivery_content"], "recovered-delivery")
+        self.assertTrue(any("recovered-delivery" in str(x) for x in bot.messages))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
