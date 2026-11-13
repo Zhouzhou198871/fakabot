@@ -252,3 +252,74 @@ def handle_confirmed_payment(
             + (f" · 上游订单：{supplier_order_id}" if supplier_order_id else ""),
         )
         return True
+
+
+def reconcile_pending_supplier_deliveries(
+    bot, load_orders, save_orders, admin_id="", supplier_client_factory=None,
+):
+    """Poll only already-created supplier orders; never submit a second purchase."""
+    orders = load_orders()
+    if not isinstance(orders, list):
+        return 0
+    pending = [
+        dict(row) for row in orders
+        if isinstance(row, dict)
+        and row.get("payment_status") == "paid"
+        and row.get("procurement_status") == "supplier_order_pending_delivery"
+        and str(row.get("supplier_order_id") or "").strip()
+        and not str(row.get("delivery_content") or "").strip()
+    ]
+    if not pending:
+        return 0
+    try:
+        if supplier_client_factory is None:
+            from supplier_client import DahaoshangClient
+            supplier_client_factory = DahaoshangClient
+        client = supplier_client_factory()
+    except Exception:
+        return 0
+
+    delivered_count = 0
+    for row in pending:
+        order_id = str(row.get("order_id") or "")
+        supplier_order_id = str(row.get("supplier_order_id") or "")
+        try:
+            result = client.get_order(supplier_order_id)
+            content = str(result.get("content") or "").strip()
+            if not content:
+                continue
+            delivered = _save_order_updates(
+                order_id,
+                {
+                    "delivery_content": content,
+                    "supplier_status": result.get("supplier_status"),
+                    "procurement_status": "delivered",
+                    "status": "delivered",
+                    "delivered_at": datetime.now(timezone.utc).isoformat(),
+                    "procurement_reconciled_at": datetime.now(timezone.utc).isoformat(),
+                },
+                load_orders,
+                save_orders,
+            )
+            if not delivered or not delivered.get("delivery_content"):
+                continue
+            _notify(
+                bot, delivered.get("user_id"),
+                "✅ 上游订单已完成发货。\n"
+                f"订单：{delivered.get('order_id')}\n"
+                f"上游订单：{supplier_order_id}\n\n"
+                "📦 商品交付内容：\n" + delivered["delivery_content"],
+            )
+            _notify_admin(
+                bot, admin_id,
+                "✅ 延迟交付已自动补齐。\n"
+                f"订单：{order_id} · 上游订单：{supplier_order_id}",
+            )
+            delivered_count += 1
+        except Exception:
+            # Pending upstream fulfillment and transient network errors are
+            # retried on the next polling cycle. No purchase endpoint is called.
+            continue
+    return delivered_count
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
