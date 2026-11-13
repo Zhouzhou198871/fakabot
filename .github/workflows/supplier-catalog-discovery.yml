@@ -2,8 +2,6 @@ name: Supplier catalog discovery
 on:
   push:
     branches: [main]
-    paths:
-      - ".github/workflows/supplier-catalog-discovery.yml"
   workflow_dispatch:
 permissions:
   contents: read
