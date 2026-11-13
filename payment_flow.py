@@ -13,6 +13,10 @@ _lock = threading.RLock()
 ORDER_TTL_SECONDS = max(300, int(os.getenv("PAYMENT_ORDER_TTL_SECONDS", "1200")))
 
 def create_payment_order(user_id, product, load_orders, save_orders):
+    # Never accept customer funds for catalog rows that have not been verified
+    # against the live supplier catalog and procurement path.
+    if product.get("supplier_verified") is not True:
+        raise PaymentConfigurationError("该商品尚未完成上游核价与采购验证，暂不接受付款。")
     receive_address = os.getenv("TRON_RECEIVE_ADDRESS", "TTT5MV8xeZqKaPDxUcDjR8bPFz2ce5kmBr").strip()
     if not receive_address:
         raise PaymentConfigurationError("收款地址尚未配置，请联系客服。")
