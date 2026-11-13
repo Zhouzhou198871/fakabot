@@ -998,3 +998,1206 @@ def show_account_category_page(call):
         "<b>晴天数字商品商城</b>\n"
         "仅展示实时在售且有库存的成品账号商品，商品地区、年限、邮箱及登录方式以商品详情为准。\n\n"
         "<b>现货成品号 · 实时价格 · 有货展示</b>\n"
+        "付款前请核对商品规格和使用条件；交付后按店铺售后规则处理。\n\n"
+        "<i>请选择下方分类，浏览商品详情。</i>"
+    )
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_account_kb(page))
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("list_"))
+def show_category_list(call):
+    bot.answer_callback_query(call.id)
+    cat_id = call.data.replace("list_", "")
+    titles = {
+        "apple": f"🍎 <b>苹果ID 专区（{len(APPLE_PRODUCTS)} 种账号）</b>",
+        "tg": f"✈️ <b>TG账号 专区（{len(TG_PRODUCTS)} 种账号）</b>",
+        "ai": f"🤖 <b>AI 专区（{len(AI_PRODUCTS)} 种账号）</b>",
+        "video": "🎬 <b>视频账号</b>",
+    }
+    safe_edit(
+        bot, call.message.chat.id, call.message.message_id,
+        get_product_page_text(cat_id, 0), get_products_kb(cat_id, 0)
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("products_"))
+def show_product_page(call):
+    bot.answer_callback_query(call.id)
+    parts = call.data.split("_")
+    if len(parts) != 3:
+        bot.answer_callback_query(call.id, "商品分页参数无效，请重新打开分类。", show_alert=True)
+        return
+    cat_id = parts[1]
+    try:
+        page = int(parts[2])
+    except ValueError:
+        page = 0
+    if cat_id not in PRODUCT_CATALOGS and cat_id not in BRAND_GROUPS:
+        bot.answer_callback_query(call.id, "商品分类不存在。", show_alert=True)
+        return
+    safe_edit(
+        bot, call.message.chat.id, call.message.message_id,
+        get_product_page_text(cat_id, page), get_products_kb(cat_id, page)
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
+def buy_item(call):
+    # Product IDs may themselves contain underscores; only the final segment is the page.
+    payload = call.data[4:]
+    prod_id, separator, page_text = payload.rpartition("_")
+    if not separator:
+        prod_id, page_text = payload, "0"
+    try:
+        return_page = max(0, int(page_text))
+    except ValueError:
+        return_page = 0
+    all_products = get_all_products()
+    p = next((x for x in all_products if x["id"] == prod_id), None)
+    if not p:
+        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+
+    if p.get("is_upstream"):
+        detail = (
+            f"{p.get('display_icon', '🛍️')} <b>{html.escape(p['name'])}</b>\n"
+            f"💴 上游标价：<code>{p.get('price_cny', '—')} CNY</code>\n"
+            f"💰 展示售价：<code>¥{price_cny(p['price']):.2f}</code>\n"
+            f"📦 上游库存快照：<code>{p.get('supplier_stock', 0)}</code>\n"
+            f"🆔 货号：<code>{html.escape(str(p.get('supplier_product_id', prod_id)))}</code>\n"
+            f"📋 购买须知：{html.escape(p.get('sales_notice') or SALES_POLICY['customer_notice'])}\n\n"
+            "⚠️ 商品已从大号商公开商品接口抓取；自动登录采购和卡密交付尚未验证，暂不收款。"
+        )
+        back_cat = p.get("category_key", "up0")
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        if p.get("supplier_url"):
+            kb.add(premium_button("查看上游商品", url=p["supplier_url"]))
+        kb.add(premium_button("联系客服", url="https://t.me/qingtian_Boss"))
+        kb.add(premium_button("返回列表", callback_data=f"products_{back_cat}_{return_page}"))
+        safe_edit(bot, call.message.chat.id, call.message.message_id, detail, kb)
+        return
+
+    if prod_id.startswith("ai"):
+        detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>¥{price_cny(p['price']):.2f}</code>\n\n👇 <i>商品交付方式以订单页面说明为准</i>"
+    elif prod_id.startswith("ig"):
+        detail = (
+            f"📸 <b>商品详情：{p['name']}</b>\\n"
+            f"💰 <b>售价：</b> <code>¥{price_cny(p['price']):.2f}</code>\\n\\n"
+            "购买前请核对商品规格、账号使用权限及平台规则。\\n\\n"
+            "👇 <i>商品交付方式以订单页面说明为准</i>"
+        )
+    elif prod_id.startswith("a"):
+        detail = (
+            f"🛍 <b>商品详情：{p['name']}</b>\n"
+            f"💰 <b>售价：</b> <code>¥{price_cny(p['price']):.2f}</code>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📝 <b>【商品描述】</b>\n买后发一个链接给你，获取苹果ID和密码。仅限自用。\n\n"
+            f"⚠️ <b>禁止登录账号设置，否则后果自负</b>\n\n"
+            f"📌 <b>登录操作流程图解：</b>\n"
+            f"1. 打开 App Store 退出当前账号\n"
+            f"2. 输入卡密中的账号密码登录\n"
+            f"3. 如弹窗提示，选择【其他选项】->【不升级】\n"
+            f"4. 仅限在 App Store 登录下载，<b>千万别去设置里登！</b>\n\n"
+            f"👇 <i>商品交付方式以订单页面说明为准</i>"
+        )
+    else:
+        detail = f"🛍 <b>商品详情：{p['name']}</b>\n💰 <b>售价：</b> <code>¥{price_cny(p['price']):.2f}</code>\n\n👇 <i>商品交付方式以订单页面说明为准</i>"
+
+    back_cat = "ai" if prod_id.startswith("ai") else ("instagram" if prod_id.startswith("ig") else ("apple" if prod_id.startswith("a") else "tg"))
+    back_cb = f"products_{back_cat}_{return_page}"
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if p.get("supplier_verified") is True and p.get("procurement_ready") is True:
+        kb.add(premium_button("💳 选择支付方式", callback_data=f"pay_{prod_id}"), premium_button("💬 联系客服", url="https://t.me/qingtian_Boss"))
+    else:
+        detail += "\n\n⚠️ <b>当前商品尚未完成供应链核验与自动交付验收，暂不开放付款。</b>"
+        kb.add(premium_button("💬 联系客服", url="https://t.me/qingtian_Boss"))
+    kb.add(premium_button("🔙 返回列表", callback_data=back_cb))
+    safe_edit(bot, call.message.chat.id, call.message.message_id, detail, kb)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_") and not call.data.startswith(("pay_tron_", "pay_alipay_")))
+def pay_item(call):
+    prod_id = call.data[4:]
+    product = next((x for x in get_all_products() if str(x.get("id")) == prod_id), None)
+    if not product:
+        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True); return
+    bot.answer_callback_query(call.id)
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(premium_button("支付宝扫码 · 人民币", callback_data=f"pay_alipay_{prod_id}"))
+    kb.add(premium_button("USDT（TRC20）", callback_data=f"pay_tron_{prod_id}"))
+    kb.add(premium_button("返回商品", callback_data=f"buy_{prod_id}_0"))
+    safe_edit(bot, call.message.chat.id, call.message.message_id,
+        f"💳 <b>选择支付方式</b>\n商品：{html.escape(str(product.get('name') or '商品'))}\n统一人民币标价：<b>¥{price_cny(product['price']):.2f}</b>\n固定汇率：1 USDT = 8 CNY", kb)
+
+def preflight_live_supplier_product(product):
+    """Verify the exact live upstream SKU before accepting customer funds."""
+    if not product.get("is_upstream"):
+        return
+    from supplier_client import DahaoshangClient
+    checked = DahaoshangClient().preflight_purchase(
+        product.get("supplier_product_id"),
+        product.get("supplier_price_cny"),
+        quantity=int(product.get("supplier_quantity") or 1),
+        model_id=product.get("supplier_model_id") or None,
+        email=product.get("supplier_email") or "",
+    )
+    product.update(checked)
+    product["supplier_url"] = str(product.get("supplier_url") or (
+        "https://dahaoshang.com/#/product/" + str(product.get("supplier_product_id"))
+    ))
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_tron_"))
+def pay_tron_item(call):
+    if PAYMENT_WATCHER is None:
+        bot.answer_callback_query(call.id, "链上收款暂未配置，请联系客服。", show_alert=True)
+        return
+    prod_id = call.data[len("pay_tron_"):]
+    product = next((x for x in get_all_products() if str(x.get("id")) == prod_id), None)
+    if not product:
+        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
+        return
+    try:
+        preflight_live_supplier_product(product)
+    except Exception as exc:
+        bot.answer_callback_query(call.id, "上游实时核验未通过，暂不收款；请稍后刷新重试。", show_alert=True)
+        print("上游付款前核验失败：", type(exc).__name__, flush=True)
+        return
+    try:
+        order, payment_text = create_payment_order(
+            user_id=call.from_user.id, product=product,
+            load_orders=lambda: load_json_file(ORDERS_FILE, []),
+            save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+        )
+    except PaymentConfigurationError as exc:
+        bot.answer_callback_query(call.id, str(exc), show_alert=True)
+        return
+    except Exception as exc:
+        bot.answer_callback_query(call.id, "订单创建失败，请稍后重试或联系客服。", show_alert=True)
+        print("创建支付订单失败：", repr(exc), flush=True)
+        return
+    bot.answer_callback_query(call.id, "订单已创建")
+    bot.send_photo(call.message.chat.id, photo=create_payment_qr(os.getenv("TRON_RECEIVE_ADDRESS", "TTT5MV8xeZqKaPDxUcDjR8bPFz2ce5kmBr").strip()), caption=payment_text, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_alipay_"))
+def pay_alipay_item(call):
+    if not os.getenv("ALIPAY_APP_ID", "").strip():
+        bot.answer_callback_query(call.id, "支付宝官方沙箱应用尚未配置，当前不接受支付宝付款。", show_alert=True); return
+    prod_id = call.data[len("pay_alipay_"):]
+    product = next((x for x in get_all_products() if str(x.get("id")) == prod_id), None)
+    if not product:
+        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True); return
+    try:
+        preflight_live_supplier_product(product)
+        order, payment_text = create_alipay_order(call.from_user.id, product,
+            lambda: load_json_file(ORDERS_FILE, []), lambda rows: save_json_file(ORDERS_FILE, rows))
+    except PaymentConfigurationError as exc:
+        bot.answer_callback_query(call.id, str(exc), show_alert=True); return
+    except Exception as exc:
+        bot.answer_callback_query(call.id, "支付宝订单创建失败，请联系客服。", show_alert=True)
+        print("创建支付宝订单失败：", repr(exc), flush=True); return
+    bot.answer_callback_query(call.id, "支付宝订单已创建")
+    pay_kb = types.InlineKeyboardMarkup()
+    pay_kb.add(types.InlineKeyboardButton(text="打开支付宝收银台", url=order["payment_url"]))
+    bot.send_message(call.message.chat.id, payment_text, parse_mode="HTML", reply_markup=pay_kb)
+    if ADMIN_ID.isdigit():
+        bot.send_message(int(ADMIN_ID), f"🧾 新支付宝待核账订单\n订单：{order['order_id']}\n用户：{order['user_id']}\n金额：¥{order['amount_cny']}\n商品：{order['product_name']}")
+
+@bot.message_handler(commands=['confirm_alipay'])
+def confirm_alipay_command(message):
+    """Admin confirms an actual personal-Alipay receipt; never auto-trust screenshots."""
+    if not ADMIN_ID.isdigit() or str(message.from_user.id) != ADMIN_ID:
+        bot.reply_to(message, "无权限。")
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        bot.reply_to(message, "用法：/confirm_alipay 订单号\n请先在自己的支付宝账单中核实金额与订单一致，再执行此命令。")
+        return
+    order_id = parts[1].strip()
+    orders = load_json_file(ORDERS_FILE, [])
+    target = next((x for x in orders if isinstance(x, dict) and str(x.get("order_id")) == order_id), None)
+    if not target or target.get("payment_method") != "alipay_qr":
+        bot.reply_to(message, "订单不存在，或不是支付宝订单。")
+        return
+    if target.get("payment_status") != "pending" or target.get("payment_verification") != "manual_review_required":
+        bot.reply_to(message, "该订单不是待核账状态，或已经处理；不会重复采购。")
+        return
+    target["payment_verification"] = "admin_confirmed"
+    target["alipay_confirmed_by"] = str(message.from_user.id)
+    target["alipay_confirmed_at"] = datetime.now().astimezone().isoformat()
+    save_json_file(ORDERS_FILE, orders)
+    handled = handle_confirmed_payment(
+        bot, order_id,
+        {"txid": "ALIPAY-MANUAL-" + order_id, "provider": "alipay_manual", "manual_verification": "admin_confirmed"},
+        load_orders=lambda: load_json_file(ORDERS_FILE, []),
+        save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+        admin_id=ADMIN_ID,
+    )
+    bot.reply_to(message, "✅ 已登记人工到账核验并提交自动采购处理。请查看订单状态与机器人告警。" if handled else "订单状态已变化，未重复采购。")
+
+
+@bot.message_handler(commands=['setalipayqr'])
+def set_alipay_qr_command(message):
+    if not ADMIN_ID.isdigit() or str(message.from_user.id) != ADMIN_ID:
+        bot.reply_to(message, "无权限。"); return
+    ALIPAY_QR_UPLOAD_PENDING.add(str(message.from_user.id))
+    bot.reply_to(message, "请直接发送支付宝收款二维码图片。请勿发送密码、验证码或登录凭据。")
+
+@bot.message_handler(content_types=['photo'])
+def receive_alipay_qr_photo(message):
+    uid = str(message.from_user.id)
+    if uid not in ALIPAY_QR_UPLOAD_PENDING or uid != ADMIN_ID: return
+    try:
+        info = bot.get_file(message.photo[-1].file_id)
+        data = bot.download_file(info.file_path)
+        tmp = ALIPAY_QR_FILE + ".tmp"
+        with open(tmp, "wb") as out: out.write(data)
+        os.chmod(tmp, 0o600); os.replace(tmp, ALIPAY_QR_FILE)
+        ALIPAY_QR_UPLOAD_PENDING.discard(uid)
+        bot.reply_to(message, "✅ 支付宝收款二维码已保存到本服务器。支付宝订单已可展示二维码；到账目前仍需人工核账。")
+    except Exception as exc:
+        print("保存支付宝二维码失败：", repr(exc), flush=True)
+        bot.reply_to(message, "二维码保存失败，请重新执行 /setalipayqr 后再发送。")
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_orders")
+def show_orders(call):
+    bot.answer_callback_query(call.id)
+    all_orders = load_json_file(ORDERS_FILE, [])
+    uid = str(call.from_user.id)
+    mine = [
+        item for item in all_orders
+        if isinstance(item, dict) and _order_user_id(item) == uid
+    ] if isinstance(all_orders, list) else []
+    mine.sort(key=lambda item: str(item.get("created_at") or item.get("paid_at") or ""), reverse=True)
+    if not mine:
+        text = (
+            "📦 <b>我的历史订单</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "目前还没有订单记录。您可以返回商城选择商品，订单创建后会自动归档到这里。"
+        )
+    else:
+        lines = [
+            "📦 <b>我的历史订单</b>",
+            f"共 <b>{len(mine)}</b> 笔记录 · 最近显示 10 笔",
+            "━━━━━━━━━━━━━━━━━━",
+        ]
+        status_labels = {
+            "paid": "已支付", "success": "已支付", "completed": "已完成",
+            "pending": "待支付", "pending_payment": "待支付",
+            "expired": "已过期", "failed": "失败", "delivered": "已交付",
+        }
+        for item in mine[:10]:
+            order_id = html.escape(str(item.get("order_id") or item.get("id") or "—"))
+            product = html.escape(str(item.get("product_name") or item.get("product_title") or item.get("item_name") or item.get("product") or "商品"))
+            amount = _order_amount(item)
+            raw_status = str(item.get("payment_status") or item.get("status") or "unknown").lower()
+            status = status_labels.get(raw_status, html.escape(raw_status))
+            created = html.escape(format_local_time(item.get("created_at") or item.get("paid_at") or item.get("paid_time")))
+            lines.append(
+                f"\n<b>{product}</b>\n订单：<code>{order_id}</code>\n"
+                f"金额：<b>{amount:.2f} USDT</b> · 状态：<b>{status}</b>\n"
+                f"时间：{created}"
+            )
+        text = "\n".join(lines)
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_help")
+def show_help(call):
+    notice = html.escape(SALES_POLICY["customer_notice"])
+    text = (
+        "❓ <b>成品账号购买与使用帮助</b>\n\n"
+        "<b>一、下单前核对</b>\n"
+        "1. 查看平台、国家/地区、账号年限或注册时长。\n"
+        "2. 核对是否包含邮箱、邮箱是否可用、登录方式及验证条件；商品未注明的规格请先联系客服确认。\n"
+        "3. 不同商品的登录步骤可能不同，请按商品专属教程操作，不要自行假设邮箱或二次验证一定包含。\n\n"
+        "<b>二、购买和收货</b>\n"
+        "选择分类 → 打开商品详情 → 核对售价和规格 → 按订单页面完成支付。\n"
+        "支付确认后，以机器人私聊发送的订单交付信息为准；请勿向他人转发账号资料。\n\n"
+        "<b>三、登录建议</b>\n"
+        "使用商品注明的官方客户端或官网登录。首次登录先按专属教程操作，避免短时间频繁切换设备、地区或修改安全资料。\n"
+        "请妥善保存交付信息，并自行遵守对应平台的服务条款。\n\n"
+        "<b>四、售后规则</b>\n" + notice + "\n\n"
+        "如遇未收到交付信息或商品与页面描述不符，请保留订单号和必要截图联系客服；截图请遮挡密码、验证码和恢复码。"
+    )
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, get_back_kb())
+
+def render_invite_page(chat_id, message_id, uid):
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    bot_username = bot.get_me().username
+    invite_link = f"https://t.me/{bot_username}?start=ref_{uid}"
+    if language == "en":
+        text = (
+            "🎁 <b>PERMANENT REFERRAL PROGRAM</b>\n"
+            "<i>Share your personal invitation link and build a lasting referral network.</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Lifetime 5% commission</b>\n"
+            "Receive 5% of every eligible purchase successfully paid by a friend you invite. The referral relationship is permanently linked and cannot be transferred.\n\n"
+            "💳 <b>Flexible rewards</b>\n"
+            "Referral rewards are credited to your account balance and can be used for purchases or eligible withdrawals. Minimum withdrawal: 10 USDT.\n\n"
+            "🔗 <b>Your personal invitation link</b>\n"
+            f"<code>{html.escape(invite_link)}</code>\n\n"
+            "<i>Share the link with a friend. Their qualifying paid orders will contribute to your lifetime rewards.</i>"
+        )
+    else:
+        text = (
+            "🎁 <b>永久邀请奖励计划</b>\n"
+            "<i>分享专属邀请链接，建立长期有效的好友邀请关系。</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>好友消费，永久返佣 5%</b>\n"
+            "好友通过您的专属链接加入后将永久绑定。此后每笔符合条件且已成功支付的订单，您都可获得订单金额 5% 的邀请奖励，绑定关系不可转移。\n\n"
+            "💳 <b>奖励灵活使用</b>\n"
+            "邀请奖励计入账户余额，可用于购买商品，也可申请提现。提现最低门槛为 10 USDT。\n\n"
+            "🔗 <b>您的专属邀请链接</b>\n"
+            f"<code>{html.escape(invite_link)}</code>\n\n"
+            "<i>复制并分享链接给好友。好友后续成功支付的合格订单，将持续为您累计邀请奖励。</i>"
+        )
+    safe_edit(bot, chat_id, message_id, text, get_invite_kb(language))
+
+def render_invite_friends(chat_id, message_id, uid, page=0):
+    selected, total, pages, page = get_referral_page(uid, page)
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    if language == "en":
+        lines = [
+            "👥 <b>REFERRAL ORDER STATEMENTS</b>",
+            "<i>Paid orders from permanently linked invited friends</i>",
+            "",
+            f"Records: <b>{total}</b>  ·  Page <b>{page+1}/{pages}</b>",
+            "━━━━━━━━━━━━━━━━━━"
+        ]
+    else:
+        lines = [
+            "👥 <b>邀请好友 · 订单返佣明细</b>",
+            "<i>逐笔查看好友资料、成功订单及对应邀请收益</i>",
+            "",
+            f"记录总数：<b>{total}</b> 条　·　第 <b>{page+1}/{pages}</b> 页",
+            "━━━━━━━━━━━━━━━━━━"
+        ]
+    if selected:
+        for index, row in enumerate(selected, start=page * REFERRAL_PAGE_SIZE + 1):
+            nick = html.escape(row["nickname"][:40])
+            uid_text = html.escape(row["user_id"])
+            date_text = html.escape(format_local_time(row.get("date")))
+            product = html.escape(row["product"][:80])
+            order_id = html.escape(row["order_id"])
+            if row["no_order"]:
+                if language == "en":
+                    lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                    lines.append(f"Joined: {date_text}")
+                    lines.append("<i>No successfully paid orders yet.</i>")
+                else:
+                    lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                    lines.append(f"加入时间：{date_text}")
+                    lines.append("<i>暂未产生已确认支付的订单。</i>")
+                continue
+            amount = float(row["amount"])
+            commission = float(row["commission"])
+            if language == "en":
+                lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                lines.append(f"Date: <b>{date_text}</b>")
+                lines.append(f"Product: {product}")
+                lines.append(f"Order: <code>{order_id}</code>")
+                lines.append(f"Spend: <b>{amount:.2f} USDT</b>  ·  Rate: <b>{row['rate']*100:.0f}%</b>")
+                lines.append(f"Reward: <b>+{commission:.2f} USDT</b>")
+            else:
+                lines.append(f"\n<b>{index:02d} · {nick}</b>  <code>{uid_text}</code>")
+                lines.append(f"消费日期：<b>{date_text}</b>")
+                lines.append(f"商品名称：{product}")
+                lines.append(f"订单编号：<code>{order_id}</code>")
+                lines.append(f"消费金额：<b>{amount:.2f} USDT</b>　返佣比例：<b>{row['rate']*100:.0f}%</b>")
+                lines.append(f"本笔返佣：<b>+{commission:.2f} USDT</b>")
+            lines.append("────────────────")
+    else:
+        lines.append("\n<i>No referral records yet.</i>" if language == "en" else "\n<i>暂无邀请好友或订单记录，好友成功消费后会在这里逐笔展示。</i>")
+    lines.append("\n<i>Only successfully paid orders are included. Commission is calculated at 5%.</i>" if language == "en"
+                 else "\n<i>仅统计系统确认成功的订单；返佣按订单实付金额的 5% 计算。</i>")
+    safe_edit(bot, chat_id, message_id, "\n".join(lines), get_invite_friends_kb(page, pages, language))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_invite")
+def show_invite(call):
+    bot.answer_callback_query(call.id)
+    render_invite_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("invite_friends_"))
+def show_invite_friends(call):
+    try:
+        page = int(call.data.rsplit("_", 1)[1])
+    except ValueError:
+        page = 0
+    bot.answer_callback_query(call.id)
+    render_invite_friends(call.message.chat.id, call.message.message_id, call.from_user.id, page)
+
+@bot.callback_query_handler(func=lambda call: call.data == "invite_page_info")
+def invite_page_info(call):
+    bot.answer_callback_query(call.id)
+
+def render_wallet_page(chat_id, message_id, uid):
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    address = str(user.get("wallet_address") or "")
+    display_address = address if address else ("Not bound" if language == "en" else "暂未绑定")
+    balance = float(user.get("balance", 0) or 0)
+    referral_reward = float(user.get("invite_bonus", 0) or 0)
+    if language == "en":
+        text = (
+            "WALLET MANAGEMENT\n"
+            "<i>TRON network · USDT · TRC20</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"Available balance: <b>{balance:.2f} USDT</b>\n"
+            f"Referral rewards: <b>{referral_reward:.2f} USDT</b>\n\n"
+            f"Bound receiving address:\n<code>{html.escape(display_address)}</code>\n\n"
+            "You may update this address at any time. A new address is saved only after you review the full address and confirm it."
+        )
+    else:
+        text = (
+            "钱包地址管理\n"
+            "<i>TRON 网络 · USDT · TRC20</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"账户可用余额：<b>{balance:.2f} USDT</b>\n"
+            f"累计邀请奖励：<b>{referral_reward:.2f} USDT</b>\n\n"
+            f"当前绑定收款地址：\n<code>{html.escape(display_address)}</code>\n\n"
+            "您可以随时更换收款地址。新地址必须先完整展示，经您逐位核对并确认后才会保存。提现前也会再次核对收款地址。"
+        )
+    safe_edit(bot, chat_id, message_id, text, get_wallet_kb(language))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_bind")
+def wallet_bind(call):
+    bot.answer_callback_query(call.id)
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    prompt = ("Send your TRC20 USDT address. You will be asked to verify the full address before saving it."
+              if language == "en" else
+              "请发送您的 TRC20-USDT 收款地址。系统会先展示完整地址供您核对，确认后才会保存。")
+    sent = bot.send_message(call.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True))
+    bot.register_next_step_handler(sent, receive_wallet_address)
+
+def receive_wallet_address(message):
+    address = (message.text or "").strip()
+    user = get_user(message.from_user.id)
+    language = user.get("language", "zh")
+    if not valid_tron_address(address):
+        bot.reply_to(message, "Invalid TRON address. Please enter a valid TRC20 address starting with T." if language == "en"
+                     else "地址格式不正确。请检查是否为 TRON 网络的 TRC20 地址（通常以 T 开头），然后重新绑定。")
+        return
+    users = load_json_file(USERS_FILE, {})
+    users.setdefault(str(message.from_user.id), {})["pending_wallet_address"] = address
+    save_json_file(USERS_FILE, users)
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(premium_button("Confirm and save address" if language == "en" else "核对无误，确认绑定",
+                          callback_data="wallet_confirm"))
+    kb.add(premium_button("Cancel" if language == "en" else "取消", callback_data="wallet_cancel"))
+    preview = (f"Please verify this complete address carefully:\n<code>{html.escape(address)}</code>\n\n"
+               "Only confirm if every character is correct." if language == "en" else
+               f"请仔细核对以下完整收款地址：\n<code>{html.escape(address)}</code>\n\n确认前请逐位检查，确保网络和地址均正确。")
+    bot.send_message(message.chat.id, preview, parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_confirm")
+def wallet_confirm(call):
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(str(call.from_user.id), {})
+    address = str(user.get("pending_wallet_address") or "")
+    if not valid_tron_address(address):
+        bot.answer_callback_query(call.id, "No pending address to confirm.", show_alert=True)
+        return
+    user["wallet_address"] = address
+    user.pop("pending_wallet_address", None)
+    users[str(call.from_user.id)] = user
+    save_json_file(USERS_FILE, users)
+    bot.answer_callback_query(call.id, "Wallet address saved." if user.get("language") == "en" else "钱包地址已确认保存")
+    bot.send_message(call.message.chat.id, "Wallet address updated successfully." if user.get("language") == "en"
+                     else "钱包地址已成功绑定 / 更新。")
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_cancel")
+def wallet_cancel(call):
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(str(call.from_user.id), {})
+    user.pop("pending_wallet_address", None)
+    users[str(call.from_user.id)] = user
+    save_json_file(USERS_FILE, users)
+    bot.answer_callback_query(call.id, "Cancelled.")
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_withdraw")
+def wallet_withdraw(call):
+    bot.answer_callback_query(call.id)
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    address = str(user.get("wallet_address") or "")
+    balance = float(user.get("balance", 0) or 0)
+    if not valid_tron_address(address):
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.add(premium_button("Bind wallet address" if language == "en" else "先绑定收款钱包", callback_data="wallet_bind"))
+        bot.send_message(call.message.chat.id,
+                         "Please bind and verify a TRC20 wallet first." if language == "en" else
+                         "请先绑定并核对 TRC20 收款钱包地址，再申请提现。", reply_markup=kb)
+        return
+    if balance < WITHDRAW_MINIMUM:
+        bot.send_message(call.message.chat.id,
+                         f"Minimum withdrawal: 10 USDT. Available: {balance:.2f} USDT." if language == "en" else
+                         f"提现门槛为 10 USDT，当前可用余额 {balance:.2f} USDT，达到门槛后即可申请。")
+        return
+    prompt = ("Enter the withdrawal amount in USDT. Your saved wallet address will be shown for final confirmation."
+              if language == "en" else "请输入提现金额（USDT）。提交前系统会再次展示已绑定的钱包地址供您核对。")
+    sent = bot.send_message(call.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True))
+    bot.register_next_step_handler(sent, receive_withdraw_amount)
+
+def receive_withdraw_amount(message):
+    uid = str(message.from_user.id)
+    user = get_user(uid)
+    language = user.get("language", "zh")
+    try:
+        amount = round(float((message.text or "").strip()), 6)
+    except (TypeError, ValueError):
+        bot.reply_to(message, "Invalid amount." if language == "en" else "金额格式不正确，请重新发起提现申请。")
+        return
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(uid, {})
+    balance = float(user.get("balance", 0) or 0)
+    address = str(user.get("wallet_address") or "")
+    if amount < WITHDRAW_MINIMUM or amount > balance or not valid_tron_address(address):
+        bot.reply_to(message, "Amount or wallet is invalid. Please check your balance and saved wallet." if language == "en"
+                     else "提现金额无效、余额不足或钱包未绑定，请检查后重新申请。")
+        return
+    user["pending_withdrawal"] = {"amount": amount, "address": address, "created_at": time.time()}
+    users[uid] = user
+    save_json_file(USERS_FILE, users)
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    kb.add(premium_button("Confirm withdrawal request" if language == "en" else "确认提交提现申请", callback_data="wallet_withdraw_confirm"))
+    kb.add(premium_button("Cancel" if language == "en" else "取消", callback_data="wallet_withdraw_cancel"))
+    text = (f"Confirm withdrawal:\n<b>{amount:.2f} USDT</b>\nTRC20 address:\n<code>{html.escape(address)}</code>\n\n"
+            "Please verify the destination before submitting." if language == "en" else
+            f"请核对提现信息：\n提现金额：<b>{amount:.2f} USDT</b>\nTRC20 收款地址：\n<code>{html.escape(address)}</code>\n\n确认地址和金额无误后，再提交申请。")
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_withdraw_confirm")
+def wallet_withdraw_confirm(call):
+    uid = str(call.from_user.id)
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(uid, {})
+    pending = user.get("pending_withdrawal") or {}
+    amount = round(float(pending.get("amount", 0) or 0), 6)
+    address = str(pending.get("address") or "")
+    balance = float(user.get("balance", 0) or 0)
+    if amount < WITHDRAW_MINIMUM or amount > balance or not valid_tron_address(address) or address != user.get("wallet_address"):
+        bot.answer_callback_query(call.id, "Withdrawal details changed or invalid. Please restart.", show_alert=True)
+        user.pop("pending_withdrawal", None)
+        users[uid] = user
+        save_json_file(USERS_FILE, users)
+        return
+    withdrawals = load_json_file(WITHDRAWALS_FILE, [])
+    request_id = f"WD{int(time.time())}{uid[-4:]}"
+    user["balance"] = round(balance - amount, 6)
+    user.pop("pending_withdrawal", None)
+    users[uid] = user
+    withdrawals.append({"request_id": request_id, "user_id": uid, "amount": amount,
+                        "address": address, "status": "pending", "created_at": time.time()})
+    save_json_file(USERS_FILE, users)
+    save_json_file(WITHDRAWALS_FILE, withdrawals)
+    language = user.get("language", "zh")
+    bot.answer_callback_query(call.id, "Request submitted." if language == "en" else "提现申请已提交")
+    bot.send_message(call.message.chat.id,
+                     f"Withdrawal request <b>{request_id}</b> submitted for manual review." if language == "en" else
+                     f"提现申请已提交，编号：<code>{request_id}</code>\n状态：待人工审核。", parse_mode="HTML")
+    if ADMIN_ID.isdigit():
+        try:
+            bot.send_message(int(ADMIN_ID),
+                f"💸 <b>新提现申请</b>\n编号：<code>{request_id}</code>\n用户：<code>{uid}</code>\n金额：{amount:.2f} USDT\n地址：<code>{html.escape(address)}</code>",
+                parse_mode="HTML")
+        except Exception:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_withdraw_cancel")
+def wallet_withdraw_cancel(call):
+    users = load_json_file(USERS_FILE, {})
+    user = users.get(str(call.from_user.id), {})
+    user.pop("pending_withdrawal", None)
+    users[str(call.from_user.id)] = user
+    save_json_file(USERS_FILE, users)
+    bot.answer_callback_query(call.id, "Cancelled.")
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "ui_recharge")
+def show_recharge(call):
+    user = get_user(call.from_user.id)
+    language = user.get("language", "zh")
+    uid = str(call.from_user.id)
+    display_name = str(user.get("name") or call.from_user.first_name or ("User" if language == "en" else "用户"))
+    balance = float(user.get("balance", 0) or 0)
+    referral_reward = float(user.get("invite_bonus", 0) or 0)
+    wallet = str(user.get("wallet_address") or "")
+    wallet_display = wallet if wallet else ("Not bound" if language == "en" else "暂未绑定")
+    profile_link = f'<a href="tg://user?id={uid}">{html.escape(display_name)}</a>'
+    if language == "en":
+        text = (
+            "💼 <b>ACCOUNT & FUNDS CENTER</b>\n"
+            "<i>Account overview · Balance · Referral rewards · Wallet</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Account:</b> {profile_link}\n"
+            f"🆔 <b>Telegram ID:</b> <code>{uid}</code>\n\n"
+            f"💵 <b>Available balance:</b> <b>{balance:.2f} USDT</b>\n"
+            f"🎁 <b>Referral rewards earned:</b> <b>{referral_reward:.2f} USDT</b>\n\n"
+            f"🔗 <b>TRC20 wallet:</b>\n<code>{html.escape(wallet_display)}</code>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "<i>Manage your receiving address and review it carefully before every withdrawal. Deposits are not yet automated; contact support for deposit assistance.</i>"
+        )
+    else:
+        text = (
+            "👤 <b>用户中心</b>\n"
+            "<i>账户资料 · 余额管理 · 邀请奖励 · 收款钱包</i>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>用户昵称：</b>{profile_link}\n"
+            f"🆔 <b>数字 ID：</b><code>{uid}</code>\n\n"
+            f"💵 <b>账户可用余额：</b><b>{balance:.2f} USDT</b>\n"
+            f"🎁 <b>累计邀请奖励：</b><b>{referral_reward:.2f} USDT</b>\n\n"
+            f"🔗 <b>已绑定钱包地址（TRC20）：</b>\n<code>{html.escape(wallet_display)}</code>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "<i>可在下方管理或更换收款地址。每次提现前请仔细核对完整地址。自动充值通道尚未开放，如需充值请联系客服。</i>"
+        )
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if language == "en":
+        kb.row(
+            premium_button("Manage wallet", callback_data="wallet_manage"),
+            premium_button("Withdraw", callback_data="wallet_withdraw")
+        )
+        kb.row(
+            premium_button("Referral rewards", callback_data="ui_invite"),
+            premium_button("Main menu", callback_data="ui_buy")
+        )
+    else:
+        kb.row(
+            premium_button("钱包地址管理", callback_data="wallet_manage"),
+            premium_button("申请提现", callback_data="wallet_withdraw")
+        )
+        kb.row(
+            premium_button("邀请奖励", callback_data="ui_invite"),
+            premium_button("返回主菜单", callback_data="ui_buy")
+        )
+    safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "wallet_manage")
+def wallet_manage(call):
+    bot.answer_callback_query(call.id)
+    render_wallet_page(call.message.chat.id, call.message.message_id, call.from_user.id)
+
+def archive_source_bundle():
+    """Upload a source-only ZIP to the private archive channel, replacing the prior bundle."""
+    if ARCHIVE_STORE is None:
+        return False
+
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    excluded_dirs = {".git", "__pycache__", "venv", ".venv", "node_modules"}
+    allowed_extensions = {".py", ".txt", ".yml", ".yaml", ".md", ".toml", ".ini", ".cfg", ".sh"}
+    excluded_fragments = (".env", ".pem", ".key", "secret", "credential", "private_key")
+    files = []
+
+    for current_root, dirnames, filenames in os.walk(project_root):
+        dirnames[:] = sorted(name for name in dirnames if name not in excluded_dirs)
+        for filename in filenames:
+            relative_path = os.path.relpath(os.path.join(current_root, filename), project_root)
+            lowered = relative_path.lower()
+            extension = os.path.splitext(filename)[1].lower()
+            if extension not in allowed_extensions or any(item in lowered for item in excluded_fragments):
+                continue
+            full_path = os.path.join(current_root, filename)
+            try:
+                with open(full_path, "rb") as handle:
+                    files.append((relative_path.replace(os.sep, "/"), handle.read()))
+            except OSError as exc:
+                print("⚠️ 源码归档跳过无法读取的文件：", relative_path, repr(exc), flush=True)
+
+    files.sort(key=lambda item: item[0])
+    if not files:
+        print("⚠️ 源码归档未找到可上传的源文件", flush=True)
+        return False
+
+    digest = hashlib.sha256()
+    for relative_path, content in files:
+        digest.update(relative_path.encode("utf-8") + b"\\0" + content)
+    source_digest = digest.hexdigest()
+    meta = ARCHIVE_STORE.load("meta", {})
+    if meta.get("source_bundle_sha256") == source_digest:
+        return False
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative_path, content in files:
+            archive.writestr(relative_path, content)
+    buffer.seek(0)
+    buffer.name = "qingtian_fakabot_source.zip"
+    caption = (
+        "☀️ 晴天号铺 · 源码归档\n"
+        f"文件数量：{len(files)}\n"
+        f"SHA-256：<code>{source_digest}</code>\n"
+        "仅包含程序源文件与依赖清单；排除业务 JSON、环境变量、密钥、日志和运行缓存。"
+    )
+
+    previous_message_id = meta.get("source_bundle_message_id")
+    message_id = None
+    if previous_message_id:
+        try:
+            media = types.InputMediaDocument(media=buffer, caption=caption, parse_mode="HTML")
+            bot.edit_message_media(
+                media=media,
+                chat_id=ARCHIVE_CHAT_ID,
+                message_id=int(previous_message_id),
+            )
+            message_id = int(previous_message_id)
+        except Exception as exc:
+            print("⚠️ 更新源码归档消息失败，改为上传新文件：", repr(exc), flush=True)
+            buffer.seek(0)
+
+    if message_id is None:
+        message = bot.send_document(
+            ARCHIVE_CHAT_ID,
+            buffer,
+            caption=caption,
+            parse_mode="HTML",
+            disable_notification=True,
+        )
+        message_id = message.message_id
+
+    meta["source_bundle_sha256"] = source_digest
+    meta["source_bundle_message_id"] = message_id
+    ARCHIVE_STORE.save("meta", meta)
+    print("✅ 源码已批量归档至 Telegram 私密频道：", len(files), "个文件", flush=True)
+    return True
+
+
+def referral_reward_sync_loop():
+    while True:
+        try:
+            sync_referral_rewards()
+        except Exception as exc:
+            print("⚠️ 邀请返佣同步异常：", repr(exc), flush=True)
+        time.sleep(20)
+
+
+def daily_report_text(report_date):
+    try:
+        report_tz = ZoneInfo(os.getenv("REPORT_TIMEZONE", "Asia/Shanghai"))
+    except Exception:
+        report_tz = ZoneInfo("UTC")
+    users = load_json_file(USERS_FILE, {})
+    orders = load_json_file(ORDERS_FILE, [])
+    withdrawals = load_json_file(WITHDRAWALS_FILE, [])
+    today_users = 0
+    for user in users.values():
+        try:
+            joined = user.get("join_time")
+            if joined and datetime.fromtimestamp(float(joined), tz=report_tz).date().isoformat() == report_date:
+                today_users += 1
+        except (TypeError, ValueError, OSError):
+            continue
+    paid_orders = [o for o in orders if isinstance(o, dict) and _order_is_paid(o)]
+    today_paid = []
+    for order in paid_orders:
+        stamp = order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at")
+        try:
+            paid_date = datetime.fromtimestamp(float(stamp), tz=report_tz).date().isoformat() if isinstance(stamp, (int, float)) else str(stamp)[:10]
+        except (TypeError, ValueError, OSError):
+            paid_date = ""
+        if paid_date == report_date:
+            today_paid.append(order)
+    revenue = sum(_order_amount(o) for o in today_paid)
+    pending_withdrawals = sum(
+        1 for item in withdrawals
+        if isinstance(item, dict) and str(item.get("status", "")).lower() in ("pending", "review")
+    )
+    copy_text = (
+        "☀️ <b>晴天号铺 · 数字商品服务中心</b>\n"
+        "账号商城、AI 服务与节点产品信息持续整理中。\n"
+        "欢迎通过机器人查看商品规格、价格及购买说明；下单前请核对商品适用范围，具体以订单页面展示为准。\n"
+        "有订单或使用问题，可通过机器人内的官方客服入口联系。"
+    )
+    return (
+        f"☀️ <b>晴天号铺 · 每日运营工作汇报</b>\n"
+        f"统计日期：<code>{report_date}</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"用户档案：<b>{len(users)}</b> 人\n"
+        f"今日新增：<b>{today_users}</b> 人\n"
+        f"累计订单：<b>{len(orders)}</b> 笔\n"
+        f"已确认支付：<b>{len(paid_orders)}</b> 笔\n"
+        f"今日确认支付：<b>{len(today_paid)}</b> 笔\n"
+        f"今日确认金额：<b>{revenue:.2f} USDT</b>\n"
+        f"待审核提现：<b>{pending_withdrawals}</b> 笔\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<b>系统情况</b>\n"
+        "当前在线支付入口仍待接通，以上支付统计只反映归档中已有的确认记录，不代表支付链路已完成。\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<b>今日宣传文案</b>\n"
+        f"{copy_text}"
+    )
+
+
+def _metric_time(value, report_tz):
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value), tz=report_tz)
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=report_tz) if parsed.tzinfo is None else parsed.astimezone(report_tz)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def three_hour_report_text(start_at, end_at, counters, report_tz):
+    orders = load_json_file(ORDERS_FILE, [])
+    paid = []
+    revenue = 0.0
+    if isinstance(orders, list):
+        for order in orders:
+            if not isinstance(order, dict) or not _order_is_paid(order):
+                continue
+            paid_at = _metric_time(
+                order.get("paid_at") or order.get("paid_time") or order.get("confirmed_at") or order.get("created_at"),
+                report_tz,
+            )
+            if paid_at and start_at <= paid_at < end_at:
+                paid.append(order)
+                revenue += _order_amount(order)
+    start_text = start_at.strftime("%Y-%m-%d %H:%M")
+    end_text = end_at.strftime("%Y-%m-%d %H:%M")
+    return (
+        "☀️ <b>晴天号铺 · 三小时运营汇报</b>\n"
+        "平台：<b>Telegram</b> · 机器人：<b>号铺机器人</b>\n"
+        f"统计日期：<code>{start_at.strftime('%Y-%m-%d')}</code>\n"
+        f"统计区间：<code>{start_text} — {end_text}</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"接待消息：<b>{int(counters.get('inbound_messages', 0))}</b> 次\n"
+        f"按钮交互：<b>{int(counters.get('callback_interactions', 0))}</b> 次\n"
+        f"成功收入：<b>{revenue:.2f} USDT</b>\n"
+        f"成功支付订单：<b>{len(paid)}</b> 笔\n"
+        f"签到：<b>{int(counters.get('checkins', 0))}</b> 次（当前未接入签到事件）\n"
+        f"发出节点：<b>{int(counters.get('nodes_issued', 0))}</b> 个（当前未接入发放事件）\n"
+        f"收回节点：<b>{int(counters.get('nodes_returned', 0))}</b> 个（当前未接入回收事件）\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<i>接待按消息和按钮操作次数累计，不做用户去重；未接入的业务事件不会虚构统计。</i>"
+    )
+
+
+def three_hour_report_loop():
+    timezone_name = os.getenv("REPORT_TIMEZONE", "Asia/Shanghai")
+    try:
+        report_tz = ZoneInfo(timezone_name)
+    except Exception:
+        print("⚠️ REPORT_TIMEZONE 无效，三小时汇报使用 UTC", flush=True)
+        report_tz = ZoneInfo("UTC")
+    while True:
+        now = datetime.now(report_tz)
+        next_hour = ((now.hour // 3) + 1) * 3
+        if next_hour >= 24:
+            target = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            target = now.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+        time.sleep(max(1, (target - now).total_seconds()))
+        end_at = datetime.now(report_tz).replace(minute=0, second=0, microsecond=0)
+        start_at = end_at - timedelta(hours=3)
+        counters = ARCHIVE_STORE.take_counters()
+        try:
+            report_text = three_hour_report_text(start_at, end_at, counters, report_tz)
+            ARCHIVE_STORE.send_report_snapshot(
+                report_text,
+                report_title="三小时运营汇报 " + start_at.strftime("%Y-%m-%d %H:%M"),
+            )
+            print("✅ 三小时运营汇报已发送：" + start_at.isoformat(), flush=True)
+        except Exception as exc:
+            for key, value in counters.items():
+                try:
+                    ARCHIVE_STORE.increment_counter(key, int(value or 0))
+                except Exception:
+                    pass
+            print("❌ 三小时运营汇报发送失败：", repr(exc), flush=True)
+
+
+def daily_report_loop():
+    timezone_name = os.getenv("REPORT_TIMEZONE", "Asia/Shanghai")
+    try:
+        report_tz = ZoneInfo(timezone_name)
+    except Exception:
+        print("⚠️ REPORT_TIMEZONE 无效，日报使用 UTC", flush=True)
+        report_tz = ZoneInfo("UTC")
+    while True:
+        now = datetime.now(report_tz)
+        target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        time.sleep(max(1, (target - now).total_seconds()))
+        report_date = datetime.now(report_tz).date().isoformat()
+        try:
+            meta = ARCHIVE_STORE.load("meta", {})
+            if meta.get("last_daily_report") == report_date:
+                continue
+            report_text = daily_report_text(report_date)
+            ARCHIVE_STORE.send_report_snapshot(
+                report_text, report_title="每日运营汇报 " + report_date
+            )
+            meta["last_daily_report"] = report_date
+            ARCHIVE_STORE.save("meta", meta)
+            print("✅ 每日运营汇报已发送：" + report_date, flush=True)
+        except Exception as exc:
+            print("❌ 每日运营汇报发送失败：", repr(exc), flush=True)
+
+
+@bot.message_handler(func=lambda message: True, content_types=["text"])
+def fallback_text_message(message):
+    """Give a visible response to ordinary text that has no active conversation handler."""
+    bot.send_message(
+        message.chat.id,
+        "☀️ 已收到您的消息。请使用下方菜单继续操作；如需重新打开主菜单，请发送 /start。",
+        reply_markup=get_main_kb(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def fallback_callback_query(call):
+    """Never leave an unknown inline-button callback spinning without feedback."""
+    try:
+        bot.answer_callback_query(call.id, "该入口暂不可用，请返回主菜单。", show_alert=True)
+    except Exception as exc:
+        print("⚠️ 未识别按钮回调应答失败：", repr(exc), flush=True)
+
+
+def install_callback_safety():
+    """Acknowledge every inline callback and surface handler exceptions to the user."""
+    answered_ids = set()
+    original_answer = bot.answer_callback_query
+
+    def tracked_answer(callback_query_id, *args, **kwargs):
+        result = original_answer(callback_query_id, *args, **kwargs)
+        answered_ids.add(str(callback_query_id))
+        return result
+
+    bot.answer_callback_query = tracked_answer
+
+    for entry in bot.callback_query_handlers:
+        original_handler = entry.get("function")
+        if not callable(original_handler) or getattr(original_handler, "_qingtian_safe", False):
+            continue
+
+        def safe_handler(call, *args, _handler=original_handler, **kwargs):
+            callback_id = str(call.id)
+            answered_ids.discard(callback_id)
+            try:
+                if ARCHIVE_STORE is not None:
+                    ARCHIVE_STORE.increment_counter("callback_interactions", 1)
+                return _handler(call, *args, **kwargs)
+            except Exception as exc:
+                print("❌ 内联按钮处理失败：", callback_id, repr(exc), flush=True)
+                if callback_id not in answered_ids:
+                    try:
+                        bot.answer_callback_query(call.id, "操作暂时失败，请重试。", show_alert=True)
+                    except Exception as answer_exc:
+                        print("⚠️ 按钮异常提示发送失败：", repr(answer_exc), flush=True)
+                if getattr(call, "message", None):
+                    try:
+                        bot.send_message(
+                            call.message.chat.id,
+                            "本次操作未完成，请返回主菜单重试。",
+                            reply_markup=get_main_kb(),
+                        )
+                    except Exception as send_exc:
+                        print("⚠️ 按钮异常补充提示失败：", repr(send_exc), flush=True)
+            finally:
+                if callback_id not in answered_ids:
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except Exception as answer_exc:
+                        print("⚠️ 按钮回执发送失败：", repr(answer_exc), flush=True)
+                answered_ids.discard(callback_id)
+
+        safe_handler._qingtian_safe = True
+        entry["function"] = safe_handler
+
+
+def install_message_metrics():
+    """Count every handled inbound message; intentionally do not deduplicate users."""
+    for entry in bot.message_handlers:
+        original_handler = entry.get("function")
+        if not callable(original_handler) or getattr(original_handler, "_qingtian_metrics", False):
+            continue
+        def counted_handler(message, *args, _handler=original_handler, **kwargs):
+            if ARCHIVE_STORE is not None:
+                try:
+                    ARCHIVE_STORE.increment_counter("inbound_messages", 1)
+                except Exception as exc:
+                    print("⚠️ 接待计数更新失败：", repr(exc), flush=True)
+            return _handler(message, *args, **kwargs)
+        counted_handler._qingtian_metrics = True
+        entry["function"] = counted_handler
+
+
+install_callback_safety()
+install_message_metrics()
+
+
+def alipay_event_poll_loop():
+    """Consume verified Alipay notifications buffered by the public Cloudflare Worker."""
+    import requests
+    from alipay_listener import process_alipay_notification
+    endpoint = os.getenv("ALIPAY_NOTIFY_API_URL", "https://fakabot-alipay-notify.chulingli1988.workers.dev").rstrip("/")
+    token = os.getenv("ALIPAY_NOTIFY_TOKEN", "").strip()
+    app_id = os.getenv("ALIPAY_APP_ID", "").strip()
+    seller_id = os.getenv("ALIPAY_SELLER_ID", "").strip()
+    public_key_file = os.getenv("ALIPAY_PUBLIC_KEY_FILE", "/root/.config/fakabot/alipay_sandbox_public.pem")
+    if not (token and app_id and seller_id and os.path.isfile(public_key_file)):
+        print("ℹ️ 支付宝自动通知消费端等待沙箱 AppID、SellerID 与支付宝公钥配置", flush=True)
+        return
+    public_key = open(public_key_file, "rb").read()
+    session = requests.Session()
+    headers = {"Authorization": "Bearer " + token}
+    while True:
+        try:
+            response = session.get(endpoint + "/internal/events", headers=headers, timeout=15)
+            response.raise_for_status()
+            payload = response.json()
+            for event in payload.get("items", []):
+                event_id = str(event.get("event_id") or "")
+                try:
+                    result = process_alipay_notification(
+                        event.get("params") or {}, public_key, app_id, seller_id,
+                        load_orders=lambda: load_json_file(ORDERS_FILE, []),
+                        save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+                        bot=bot, admin_id=ADMIN_ID,
+                    )
+                    if result.get("ok"):
+                        ack = session.post(endpoint + "/internal/events/" + event_id + "/ack",
+                                           headers=headers, timeout=15)
+                        ack.raise_for_status()
+                        print("✅ 支付宝异步通知已验签并处理：", result.get("order_id"), flush=True)
+                except Exception as event_exc:
+                    print("⚠️ 支付宝通知处理失败，保留事件等待重试：", type(event_exc).__name__, flush=True)
+        except Exception as exc:
+            print("⚠️ 支付宝通知队列暂不可用：", type(exc).__name__, flush=True)
+        time.sleep(8)
+
+
+def supplier_delivery_reconcile_loop():
+    """Retry delivery retrieval for known upstream order IDs; never repurchase."""
+    session_url = os.getenv("SUPPLIER_SESSION_URL", "").strip()
+    local_session = "/root/.config/fakabot/dahaoshang_session.json"
+    while True:
+        try:
+            if session_url or os.path.isfile(local_session):
+                delivered = reconcile_pending_supplier_deliveries(
+                    bot,
+                    load_orders=lambda: load_json_file(ORDERS_FILE, []),
+                    save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+                    admin_id=ADMIN_ID,
+                )
+                if delivered:
+                    print(f"✅ 自动补发已完成：{delivered} 笔", flush=True)
+        except Exception as exc:
+            print("⚠️ 上游延迟交付核对暂时失败：", type(exc).__name__, flush=True)
+        time.sleep(60)
+
+
+if __name__ == "__main__":
+    print("🤖 晴天号铺机器人启动中...", flush=True)
+    try:
+        try:
+            refresh_cloudflare_catalog(force=True)
+            print(f"✅ 商品目录已从 Cloudflare 加载：{len(UPSTREAM_CATEGORIES)} 个有货分类", flush=True)
+        except Exception as catalog_exc:
+            print("⚠️ Cloudflare 商品目录暂不可用，继续使用最近一次本地快照：", repr(catalog_exc), flush=True)
+        start_cloudflare_catalog_refresh(interval=300)
+        import threading
+        from telegram_storage import TelegramArchiveStore
+        legacy_paths = {
+            "users": USERS_FILE,
+            "orders": ORDERS_FILE,
+            "withdrawals": WITHDRAWALS_FILE,
+        }
+        ARCHIVE_STORE = TelegramArchiveStore(
+            bot=bot,
+            chat_id=ARCHIVE_CHAT_ID,
+            legacy_paths=legacy_paths,
+        )
+        archive_ready = False
+        try:
+            ARCHIVE_STORE.initialize()
+            archive_ready = True
+            print("✅ 私密 Telegram 归档已连接，业务数据不再写入服务器磁盘", flush=True)
+        except Exception as archive_init_exc:
+            # Business handlers depend on the archive store. Polling without it
+            # would make /start and every data-backed button fail silently.
+            print("❌ Telegram 归档初始化失败，停止启动并交由 systemd 重试：", repr(archive_init_exc), flush=True)
+            raise RuntimeError("业务数据归档未就绪，拒绝启动不完整的机器人实例") from archive_init_exc
+
+        # Startup notifications and source archiving are auxiliary; never block polling.
+        try:
+            me = bot.get_me()
+            startup_report = (
+                "☀️ 晴天号铺 · 启动工作汇报\n"
+                f"机器人：@{me.username or 'unknown'}\n"
+                f"启动时间：{datetime.now().astimezone().isoformat(timespec='seconds')}\n"
+                "状态：机器人正在启动消息轮询。\n"
+                "测试指令：/ping"
+            )
+            if archive_ready:
+                ARCHIVE_STORE.send_report_snapshot(startup_report, report_title="启动汇报")
+            else:
+                bot.send_message(ARCHIVE_CHAT_ID, startup_report, disable_notification=True)
+        except Exception as report_exc:
+            print("⚠️ 启动汇报发送失败，不影响机器人轮询：", repr(report_exc), flush=True)
+        # Optional Premium user-account bridge: Bot API remains primary.
+        # Missing user credentials never block the storefront or payment listener.
+        try:
+            import telegram_user_bridge
+            user_bridge_ready, user_bridge_status = telegram_user_bridge.initialize()
+            if user_bridge_ready:
+                print("✅ Telegram Premium 用户账号桥接已连接（仅作 Bot API 能力补充）", flush=True)
+            else:
+                print("ℹ️ Telegram 用户账号桥接暂未授权：", user_bridge_status, flush=True)
+        except Exception as bridge_exc:
+            print("⚠️ Telegram 用户账号桥接不可用，不影响机器人主流程：", type(bridge_exc).__name__, flush=True)
+
+        if archive_ready:
+            try:
+                PAYMENT_WATCHER = PaymentWatcher(
+                    load_orders=lambda: load_json_file(ORDERS_FILE, []),
+                    save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+                    on_payment=lambda order_id, transfer: handle_confirmed_payment(
+                        bot, order_id, transfer,
+                        load_orders=lambda: load_json_file(ORDERS_FILE, []),
+                        save_orders=lambda rows: save_json_file(ORDERS_FILE, rows),
+                        admin_id=ADMIN_ID,
+                    ),
+                )
+                PAYMENT_WATCHER.start()
+                print("✅ TRC20 USDT 付款监听已启动", flush=True)
+            except PaymentConfigurationError as exc:
+                PAYMENT_WATCHER = None
+                print("⚠️ 链上收款未启动：", str(exc), flush=True)
+            except Exception as exc:
+                PAYMENT_WATCHER = None
+                print("⚠️ 链上收款启动失败，不影响机器人菜单：", repr(exc), flush=True)
+            try:
+                archive_source_bundle()
+            except Exception as archive_exc:
+                print("❌ 源码归档上传失败，不阻断机器人消息轮询：", repr(archive_exc), flush=True)
+            threading.Thread(target=ARCHIVE_STORE.flush_loop, args=(5,), name="archive-flush", daemon=True).start()
+            threading.Thread(target=supplier_delivery_reconcile_loop, name="supplier-delivery-reconcile", daemon=True).start()
+            threading.Thread(target=alipay_event_poll_loop, name="alipay-notification-poller", daemon=True).start()
+            threading.Thread(target=referral_reward_sync_loop, name="referral-reward-sync", daemon=True).start()
+            threading.Thread(target=three_hour_report_loop, name="three-hour-operations-report", daemon=True).start()
+            threading.Thread(target=daily_report_loop, name="daily-operations-report", daemon=True).start()
+        try:
+            bot.remove_webhook()
+            print("✅ Webhook 已清理，保留待处理更新", flush=True)
+        except Exception as webhook_exc:
+            print("⚠️ Webhook 清理失败，继续尝试 long polling：", repr(webhook_exc), flush=True)
+        print("📡 开始 long polling", flush=True)
+        bot.infinity_polling(skip_pending=False, timeout=30, long_polling_timeout=30)
+    except KeyboardInterrupt:
+        print("🛑 收到停止信号，机器人退出", flush=True)
+    except Exception as exc:
+        import traceback
+        print("❌ 机器人 polling 异常：", repr(exc), flush=True)
+        traceback.print_exc()
+        raise
