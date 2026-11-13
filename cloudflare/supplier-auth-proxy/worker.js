@@ -146,6 +146,10 @@ export default {
         return json({ ok: false, error: "session_data_invalid" }, 503);
       }
     }
+    if (incoming.pathname === "/_internal_login_diagnostic") {
+      const row = await env.DB.prepare("SELECT attempted_at, http_status, payload_code, message, data_keys, token_present, token_length, response_bytes FROM supplier_login_diagnostics ORDER BY id DESC LIMIT 1").first();
+      return json({ latest: row || null });
+    }
     if (incoming.pathname === "/_internal_probe") return json(await probe(env));
 
     // All supplier API calls use the IPv4-only relay, not Worker-to-origin fetch.
@@ -166,16 +170,17 @@ export default {
       redirect: "manual",
     }));
 
-    if (incoming.pathname === "/api/user/loginjwt" && request.method === "POST" && upstream.ok) {
+    if (incoming.pathname === "/api/user/loginjwt" && request.method === "POST") {
       try {
-        const payload = await upstream.clone().json();
+        const raw = await upstream.clone().text();
+        let payload = null;
+        try { payload = JSON.parse(raw); } catch {}
         const token = payload?.Data?.access_token;
-        if (typeof token === "string" && token.length > 20) {
-          await persistSession(token, env);
-        }
-      } catch (error) {
-        console.error("supplier session persistence failed", String(error).slice(0, 100));
-      }
+        const dataKeys = payload?.Data && typeof payload.Data === "object" ? Object.keys(payload.Data).join(",").slice(0, 500) : "";
+        const message = typeof payload?.Message === "string" ? payload.Message.slice(0, 120) : Array.isArray(payload?.Message) ? payload.Message.join("; ").slice(0, 120) : "";
+        await env.DB.prepare("INSERT INTO supplier_login_diagnostics (attempted_at, http_status, payload_code, message, data_keys, token_present, token_length, response_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(new Date().toISOString(), upstream.status, payload?.Code == null ? null : String(payload.Code).slice(0, 32), message, dataKeys, typeof token === "string" ? 1 : 0, typeof token === "string" ? token.length : 0, new TextEncoder().encode(raw).length).run();
+        if (typeof token === "string" && token.length > 20) await persistSession(token, env);
+      } catch (error) { console.error("supplier login capture failed", String(error).slice(0, 100)); }
     }
     if (incoming.pathname === "/api/user/logout" && request.method === "POST") {
       await env.DB.prepare(
