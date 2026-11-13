@@ -3,18 +3,31 @@ import json
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
+from .cloudflare_catalog import refresh_cloudflare_catalog as _refresh_cloudflare_catalog
+
 from .apple import PRODUCTS as APPLE_PRODUCTS
 from .telegram import PRODUCTS as TG_PRODUCTS
 from .instagram import PRODUCTS as INSTAGRAM_PRODUCTS
 from .ai import PRODUCTS as AI_PRODUCTS
-from .nodes import PRODUCTS as NODE_PRODUCTS
 
 PRODUCT_CATALOGS = {
     "apple": APPLE_PRODUCTS,
     "tg": TG_PRODUCTS,
     "instagram": INSTAGRAM_PRODUCTS,
     "ai": AI_PRODUCTS,
-    "node": NODE_PRODUCTS,
+}
+
+# Product-side commercial rules; the bot UI will consume this when it is switched.
+SALES_POLICY = {
+    "product_scope": "finished_accounts_only",
+    "customization_allowed": False,
+    "returns_allowed": False,
+    "refunds_allowed": False,
+    "customer_notice": (
+        "本店仅销售现货成品账号，不提供定制服务。账号或虚拟商品交付后，除适用法律另有强制规定、"
+        "本店未按约交付或交付内容与商品描述不符外，不支持退货、换货或退款；供应商标题中的售后标注"
+        "不代表本店提供退货退款。请下单前核对商品地区、账号类型、年限、邮箱及登录方式。"
+    ),
 }
 
 UPSTREAM_CATEGORIES = []
@@ -53,15 +66,22 @@ def _load_upstream_catalog():
         alias = str(category.get("alias", "")).lower()
         products = []
         for row in by_category.get(category_id, []):
+            # A catalog snapshot is for display only when the upstream item is
+            # currently on sale and has positive stock. Never show stale/empty SKUs.
+            if row.get("is_on_sale") is not True or int(row.get("stock", 0) or 0) < 1:
+                continue
             supplier_id = str(row.get("supplier_product_id") or row.get("id") or "")
             if not supplier_id:
                 continue
             try:
                 cost = Decimal(str(row.get("price_cny", "0")))
-                sell = max(Decimal("0.01"), (cost / Decimal("4")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                # CNY cost / 4 = USDT sale price at exactly 100% markup
+                # under the agreed 8 CNY = 1 USDT conversion. Keep 4 decimals
+                # so low-cost SKUs are not rounded below the target margin.
+                sell = max(Decimal("0.0001"), (cost / Decimal("4")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
             except Exception:
                 continue
-            sell_text = format(sell, ".2f")
+            sell_text = format(sell, ".4f")
             cost_text = format(cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), ".2f")
             product_id = str(row.get("id") or supplier_id)
             products.append({
@@ -102,6 +122,28 @@ def _load_upstream_catalog():
 _load_upstream_catalog()
 
 
+def get_available_upstream_categories():
+    """Return only supplier categories that currently contain in-stock products."""
+    return [category for category in UPSTREAM_CATEGORIES if int(category.get("product_count", 0) or 0) > 0]
+
+
 def get_all_products():
     """Return all configured products, including the latest fetched upstream snapshot."""
     return [product for products in PRODUCT_CATALOGS.values() for product in products]
+
+
+def refresh_cloudflare_catalog(force=False):
+    """Refresh the bot's live supplier catalog from the Cloudflare edge API."""
+    return _refresh_cloudflare_catalog(
+        PRODUCT_CATALOGS,
+        UPSTREAM_CATEGORIES,
+        UPSTREAM_PRODUCT_CATALOGS,
+        UPSTREAM_CATEGORY_BY_KEY,
+        force=force,
+    )
+
+
+def start_cloudflare_catalog_refresh(interval=300):
+    """Refresh the edge catalog in the background without blocking bot callbacks."""
+    from .cloudflare_catalog import start_refresh_loop
+    return start_refresh_loop(refresh_cloudflare_catalog, interval=interval)
