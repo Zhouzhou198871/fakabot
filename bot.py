@@ -4,13 +4,18 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from telebot import types
 from products.catalog import (
-    APPLE_PRODUCTS, TG_PRODUCTS, INSTAGRAM_PRODUCTS, AI_PRODUCTS, NODE_PRODUCTS,
-    PRODUCT_CATALOGS, UPSTREAM_CATEGORIES, UPSTREAM_CATEGORY_BY_KEY, get_all_products,
+    APPLE_PRODUCTS, TG_PRODUCTS, INSTAGRAM_PRODUCTS, AI_PRODUCTS, SALES_POLICY,
+    PRODUCT_CATALOGS, UPSTREAM_CATEGORIES, UPSTREAM_PRODUCT_CATALOGS,
+    UPSTREAM_CATEGORY_BY_KEY, get_all_products,
+    refresh_cloudflare_catalog, start_cloudflare_catalog_refresh,
 )
-from payment_flow import PaymentConfigurationError, PaymentWatcher, create_payment_order, create_payment_qr, handle_confirmed_payment, reconcile_pending_supplier_deliveries
+from payment_flow import PaymentConfigurationError, PaymentWatcher, create_payment_order, create_alipay_order, price_cny, create_payment_qr, handle_confirmed_payment, reconcile_pending_supplier_deliveries
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
-ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
+# Backward-compatible admin configuration: deployments may provide ADMIN_IDS.
+# Existing notification/payment callbacks accept one primary admin ID.
+ADMIN_ID = (os.getenv("ADMIN_ID", "").strip()
+            or os.getenv("ADMIN_IDS", "").split(",")[0].strip())
 if not TOKEN:
     raise RuntimeError("缺少环境变量 BOT_TOKEN，请在服务器环境中配置机器人 Token。")
 # Keep the default worker pool small for low-memory VPS instances.
@@ -22,7 +27,6 @@ EMOJI = {
     "usdt": "5001485391807645910", "tg": "5001558608115140737", "gear": "6244525025500601411",
     "gift": "6246956045709612135", "diamond": "6244585885187184999", "star": "6244603610517215237",
     "apple": "5001358570013329603", "ai": "6289722534019475465", "video": "5001404418789214347",
-    "node": "6244694135542913498"
 }
 
 
@@ -38,6 +42,15 @@ def clean_button_text(value):
     value = str(value)
     value = re.sub(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D\u20E3]+', '', value)
     return re.sub(r'\s+', ' ', value).strip()
+
+def storefront_button(text, **kwargs):
+    """Storefront category labels stay clean; never decorate brands with unrelated emoji."""
+    label = clean_button_text(text)
+    try:
+        return types.InlineKeyboardButton(text=label or "打开", **kwargs)
+    except TypeError:
+        return types.InlineKeyboardButton(text=label or "打开", **{k:v for k,v in kwargs.items() if k != "icon_custom_emoji_id"})
+
 
 def premium_button(text, **kwargs):
     """统一给所有内联按钮配置 Telegram Premium 自定义表情图标。"""
@@ -58,8 +71,6 @@ def premium_button(text, **kwargs):
         key = "ai"
     elif any(x in probe for x in ("影音", "视频", "游戏")):
         key = "video"
-    elif "🌐" in probe or any(x in probe for x in ("节点", "node")):
-        key = "node"
     elif any(x in probe for x in ("邀请", "奖励")):
         key = "gift"
     elif any(x in probe for x in ("客服", "帮助", "返回", "更多")):
@@ -116,6 +127,8 @@ ORDERS_FILE = "/root/fakabot/orders.json"
 ARCHIVE_CHAT_ID = os.getenv("TELEGRAM_ARCHIVE_CHAT_ID", "-1004459109788").strip()
 ARCHIVE_STORE = None
 PAYMENT_WATCHER = None
+ALIPAY_QR_FILE = "/root/fakabot/alipay_receive_qr.png"
+ALIPAY_QR_UPLOAD_PENDING = set()
 
 def _archive_key(path):
     name = os.path.basename(str(path))
@@ -350,9 +363,11 @@ def enforce_two_column_keyboard(kb):
         str(getattr(button, "callback_data", "") or "")
         for row in kb.keyboard for button in row
     ]
-    if any(value.startswith("buy_") for value in callbacks) and any(
-        value.startswith("products_") for value in callbacks
-    ):
+    if (
+        any(value.startswith("buy_") for value in callbacks)
+        and any(value.startswith("products_") for value in callbacks)
+    ) or any(value.startswith("list_up") or value.startswith("catpage_") for value in callbacks):
+        # Storefront category and product pages own their row layout; preserve it.
         return kb
     buttons = [button for row in kb.keyboard for button in row]
     if not buttons:
@@ -537,21 +552,34 @@ BRAND_GROUPS = {
     "commerce": {"title": "电商账号", "brands": [("Amazon", "📦"), ("Walmart", "🏬")]},
 }
 
-def get_account_kb():
+def get_account_kb(page=0):
+    """Compact, paginated storefront navigation; hide empty upstream categories."""
     kb = types.InlineKeyboardMarkup(row_width=2)
-    buttons = [
-        premium_button(
-            f"{category.get('display_icon', '🛍️')} {category.get('name', '商品')} ({category.get('product_count', 0)})",
+    categories = [c for c in UPSTREAM_CATEGORIES if int(c.get("product_count", 0) or 0) > 0]
+    page_size = 8
+    pages = max(1, (len(categories) + page_size - 1) // page_size)
+    page = max(0, min(int(page), pages - 1))
+    visible = categories[page * page_size:(page + 1) * page_size]
+    buttons = []
+    for category in visible:
+        name = str(category.get("name", "商品分类"))
+        # Keep labels short enough for two-column Telegram buttons on phones.
+        if len(name) > 16:
+            name = name[:15] + "…"
+        category_icon = str(category.get("display_icon") or "🛍️")
+        # Keep the category's brand icon in the visible Telegram button label.
+        buttons.append(types.InlineKeyboardButton(
+            text=f"{category_icon} {name}",
             callback_data=f"list_{category['key']}"
-        )
-        for category in UPSTREAM_CATEGORIES
-    ]
+        ))
     for index in range(0, len(buttons), 2):
         kb.row(*buttons[index:index + 2])
+    # Always show both controls, including page one; callbacks clamp at valid bounds.
     kb.row(
-        premium_button("🌐 节点套餐", callback_data="list_node"),
-        premium_button("返回主菜单", callback_data="ui_buy")
+        storefront_button("‹ 上一页", callback_data=f"catpage_{max(0, page - 1)}"),
+        storefront_button("下一页 ›", callback_data=f"catpage_{min(pages - 1, page + 1)}")
     )
+    kb.row(storefront_button("返回主菜单", callback_data="ui_buy"))
     return kb
 
 def get_brand_group_kb(group_id):
@@ -559,7 +587,7 @@ def get_brand_group_kb(group_id):
     kb = types.InlineKeyboardMarkup(row_width=2)
     for brand_index, (brand_name, brand_emoji) in enumerate(group["brands"]):
         # Brand-specific Premium emoji IDs are intentionally not fabricated.
-        kb.add(premium_button(f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{brand_index}"))
+        kb.add(types.InlineKeyboardButton(text=f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{brand_index}"))
     kb.row(premium_button("返回账号商城", callback_data="cat_account"))
     return kb
 
@@ -588,27 +616,59 @@ def get_product_page_text(cat_id, page=0):
         "video": ("🎬", "视频账号专区", "选择需要的视频平台账号类别。"),
         "communication": ("💬", "通讯账号专区", "选择需要的通讯平台账号类别。"),
         "commerce": ("🛒", "电商账号专区", "选择需要的电商平台账号类别。"),
-        "node": ("🌐", "节点套餐专区", "按流量和使用需求选择套餐；购买前请确认套餐规格。"),
     }
     upstream_category = UPSTREAM_CATEGORY_BY_KEY.get(cat_id)
     if upstream_category:
         titles[cat_id] = (
             upstream_category.get("display_icon", "🛍️"),
             upstream_category.get("name", "商品专区"),
-            "大号商实时商品目录。价格按人民币采购价 ÷ 4 换算为 USDT 展示；上游自动采购尚未完成验证，当前仅供浏览。"
+            "仅展示当前有货的成品账号；地区、年限、邮箱及登录方式请以商品详情为准。"
         )
     icon, title, intro = titles.get(cat_id, ("🛍️", "商品专区", "请选择适合您的商品。"))
-    first = page * 8 + 1 if total else 0
-    last = min((page + 1) * 8, total)
-    item_label = "平台入口" if cat_id in BRAND_GROUPS else "商品"
     return (
-        f"{icon} <b>{title}</b>\n"
-        f"📦 {item_label}数量：<b>{total} 种</b>\n"
-        f"📄 当前页：<b>{page + 1}/{pages}</b> · 显示第 <b>{first}-{last}</b> 项\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"{intro}\n\n"
-        "👇 <b>请选择下方项目：</b>"
+        f"<b>{html.escape(title)}</b>\n"
+        f"{html.escape(intro)}\n\n"
+        "<i>请选择下方项目，查看商品规格与详情。</i>"
     )
+
+
+def get_catalog_product_icon(product, cat_id):
+    """Resolve a visible brand/platform icon for every sale item and brand entry."""
+    explicit = str(product.get("display_icon") or "").strip()
+    if explicit and explicit != "🛍️":
+        return explicit
+    name = str(product.get("name", "")).lower()
+    # Local catalog IDs are authoritative; do not let short brand fragments collide.
+    local_icons = {"apple": "🍎", "tg": "✈️", "instagram": "📸", "ai": "🤖"}
+    if cat_id in local_icons:
+        return local_icons[cat_id]
+    if "microsoft teams" in name or "teams" in name:
+        return "👥"
+    if "chatgpt" in name or "openai" in name:
+        return "🤖"
+    brand_icons = (
+        (("instagram", "threads"), "📸"), (("facebook",), "📘"),
+        (("twitter", "推特", " x "), "𝕏"), (("discord",), "🎮"),
+        (("tiktok", "抖音"), "🎵"), (("telegram", "电报", "飞机"), "✈️"),
+        (("google", "谷歌", "gmail"), "✉️"), (("microsoft", "微软", "outlook", "hotmail", "teams"), "🪟"),
+        (("yahoo", "雅虎"), "💜"), (("mail.ru", "邮箱", "mail"), "📨"),
+        (("whatsapp",), "💬"), (("line",), "🟢"), (("textnow",), "📱"),
+        (("linkedin", "领英"), "💼"), (("youtube", "优酷"), "▶️"),
+        (("netflix", "奈飞"), "🎬"), (("twitch",), "🟣"),
+        (("steam",), "🎮"), (("amazon", "亚马逊", "aws"), "📦"),
+        (("walmart", "沃尔玛"), "🏬"), (("apple", "苹果", "icloud", "小火箭"), "🍎"),
+        (("google voice",), "📞"),
+    )
+    for keywords, icon in brand_icons:
+        if any(word in name for word in keywords):
+            return icon
+    upstream = UPSTREAM_CATEGORY_BY_KEY.get(cat_id)
+    if upstream:
+        icon = str(upstream.get("display_icon") or "").strip()
+        if icon and icon != "🛍️":
+            return icon
+    category_icons = {"social": "👥", "email": "✉️", "video": "🎬", "communication": "💬", "commerce": "🛒"}
+    return category_icons.get(cat_id, "🧩")
 
 
 def get_products_kb(cat_id, page=0):
@@ -622,7 +682,7 @@ def get_products_kb(cat_id, page=0):
     product_icons = {
         "apple": "🍎", "tg": "✈️", "instagram": "📸", "ai": "🤖", "social": "👥",
         "email": "✉️", "video": "🎬", "communication": "💬",
-        "commerce": "🛒", "node": "🌐"
+        "commerce": "🛒"
     }
     upstream_category = UPSTREAM_CATEGORY_BY_KEY.get(cat_id)
     product_icon = (
@@ -631,8 +691,8 @@ def get_products_kb(cat_id, page=0):
     )
     if cat_id in BRAND_GROUPS:
         brand_buttons = [
-            premium_button(
-                product["name"],
+            types.InlineKeyboardButton(
+                text=f"{get_catalog_product_icon(product, cat_id)} {product['name']}",
                 callback_data=f"brand_{cat_id}_{product['brand_index']}"
             )
             for product in selected
@@ -640,13 +700,15 @@ def get_products_kb(cat_id, page=0):
         for index in range(0, len(brand_buttons), 2):
             kb.row(*brand_buttons[index:index + 2])
     else:
-        for product_index, product in enumerate(selected, start=page * 8 + 1):
+        for product in selected:
             callback = f"buy_{product['id']}_{page}"
             product_name = str(product.get("name", "商品"))
             if len(product_name) > 52:
                 product_name = product_name[:49] + "…"
-            label = f"{product_icon} {product_index}. {product_name} | {product['price']} U"
-            kb.add(premium_button(label, callback_data=callback))
+            # Resolve the brand icon for every item, including local and upstream catalogs.
+            brand_icon = get_catalog_product_icon(product, cat_id)
+            label = f"{brand_icon} {product_name} | ¥{price_cny(product['price']):.2f}"
+            kb.add(types.InlineKeyboardButton(text=label, callback_data=callback))
     if not selected:
         kb.add(premium_button("暂无已登记商品", callback_data="show_support"))
     previous_page = max(0, page - 1)
@@ -845,21 +907,12 @@ def show_support(call):
 def show_account_menu(call):
     bot.answer_callback_query(call.id)
     account_shop_text = (
-        "🛒 <b>账号专属商城</b>\n\n"
-        "🏆 <b>源头直供，全网底价</b>\n"
-        "✨ 专注提供全球优质账号，全部现货秒发。\n"
-        "🛡️ <b>安全保障</b>：售后质保，提供详细操作指南。\n"
-        "⚡ <b>自动发货</b>：24小时无人值守，即买即用。\n\n"
-        "📚 <b>商品分类：共 9 大类</b>\n"
-        "包含苹果 ID、TG、AI、社交、邮箱、视频、通讯、电商及节点套餐。\n\n"
-        "👇 请选择您需要的账号类型："
+        "<b>晴天商城</b>\n"
+        "选择下方品牌，浏览商品与规格。\n"
+        "标价以 USDT 结算。\n"
+        "<i>自动采购与发货验证中，暂未开放上游商品付款。</i>"
     )
     safe_edit(bot, call.message.chat.id, call.message.message_id, account_shop_text, get_account_kb())
-
-@bot.callback_query_handler(func=lambda call: call.data == "cat_node")
-def show_node_menu(call):
-    bot.answer_callback_query(call.id)
-    safe_edit(bot, call.message.chat.id, call.message.message_id, "🚀 <b>节点铺</b>\n👇 <i>请选择：</i>", get_products_kb("node"))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("brands_"))
 def show_brand_group(call):
@@ -931,71 +984,17 @@ def show_brand_notice(call):
     kb.row(premium_button("联系客服", url="https://t.me/qingtian_Boss"), premium_button("返回品牌分类", callback_data=f"brands_{group_id}"))
     safe_edit(bot, call.message.chat.id, call.message.message_id, text, kb)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("list_"))
-def show_category_list(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("catpage_"))
+def show_account_category_page(call):
     bot.answer_callback_query(call.id)
-    cat_id = call.data.replace("list_", "")
-    titles = {
-        "apple": f"🍎 <b>苹果ID 专区（{len(APPLE_PRODUCTS)} 种账号）</b>",
-        "tg": f"✈️ <b>TG账号 专区（{len(TG_PRODUCTS)} 种账号）</b>",
-        "ai": f"🤖 <b>AI 专区（{len(AI_PRODUCTS)} 种账号）</b>",
-        "video": "🎬 <b>视频账号</b>",
-        "node": f"🌐 <b>节点套餐（{len(NODE_PRODUCTS)} 种套餐）</b>"
-    }
-    safe_edit(
-        bot, call.message.chat.id, call.message.message_id,
-        get_product_page_text(cat_id, 0), get_products_kb(cat_id, 0)
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("products_"))
-def show_product_page(call):
-    bot.answer_callback_query(call.id)
-    parts = call.data.split("_")
-    if len(parts) != 3:
-        bot.answer_callback_query(call.id, "商品分页参数无效，请重新打开分类。", show_alert=True)
-        return
-    cat_id = parts[1]
     try:
-        page = int(parts[2])
-    except ValueError:
+        page = int(call.data.split("_", 1)[1])
+    except (ValueError, IndexError):
         page = 0
-    if cat_id not in PRODUCT_CATALOGS and cat_id not in BRAND_GROUPS:
-        bot.answer_callback_query(call.id, "商品分类不存在。", show_alert=True)
-        return
-    safe_edit(
-        bot, call.message.chat.id, call.message.message_id,
-        get_product_page_text(cat_id, page), get_products_kb(cat_id, page)
-    )
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
-def buy_item(call):
-    parts = call.data.split("_")
-    prod_id = parts[1] if len(parts) > 1 else ""
-    try:
-        return_page = max(0, int(parts[2])) if len(parts) > 2 else 0
-    except ValueError:
-        return_page = 0
-    all_products = get_all_products()
-    p = next((x for x in all_products if x["id"] == prod_id), None)
-    if not p:
-        bot.answer_callback_query(call.id, "商品不存在或已下架，请刷新商品列表。", show_alert=True)
-        return
-    bot.answer_callback_query(call.id)
-
-    if p.get("is_upstream"):
-        detail = (
-            f"{p.get('display_icon', '🛍️')} <b>{html.escape(p['name'])}</b>\\n"
-            f"💴 上游标价：<code>{p.get('price_cny', '—')} CNY</code>\\n"
-            f"💰 展示售价：<code>{p['price']} USDT</code>\\n"
-            f"📦 上游库存快照：<code>{p.get('supplier_stock', 0)}</code>\\n"
-            f"🆔 货号：<code>{html.escape(str(p.get('supplier_product_id', prod_id)))}</code>\\n\\n"
-            "⚠️ 商品已从大号商公开商品接口抓取；自动登录采购和卡密交付尚未验证，暂不收款。"
-        )
-        back_cat = p.get("category_key", "up0")
-        kb = types.InlineKeyboardMarkup(row_width=2)
-        if p.get("supplier_url"):
-            kb.add(premium_button("查看上游商品", url=p["supplier_url"]))
-        kb.add(premium_button("联系客服", url="https://t.me/qingtian_Boss"))
-        kb.add(premium_button("返回列表", callback_data=f"products_{back_cat}_{return_page}"))
-
+    visible_categories = sum(int(c.get("product_count", 0) or 0) > 0 for c in UPSTREAM_CATEGORIES)
+    total_pages = max(1, (visible_categories + 7) // 8)
+    page = max(0, min(page, total_pages - 1))
+    text = (
+        "<b>晴天数字商品商城</b>\n"
+        "仅展示实时在售且有库存的成品账号商品，商品地区、年限、邮箱及登录方式以商品详情为准。\n\n"
+        "<b>现货成品号 · 实时价格 · 有货展示</b>\n"
