@@ -74,8 +74,9 @@ jobs:
                           for m in list(re.finditer(re.escape(needle),body,re.I))[:12]:
                               snippets.append({"needle":needle,"context":body[max(0,m.start()-350):min(len(body),m.end()+500)]})
                       entry["code_contexts"]=snippets[:100]
-                      entry["api_functions"]=[{"context":body[max(0,m.start()-180):min(len(body),m.end()+420)]} for m in list(re.finditer(r'url:["\\\\'](/api/[^"\\\\']+)',body))[:200]]
-                      entry["all_api_paths"]=list(dict.fromkeys(re.findall(r'url:["\\\\'](/api/[^"\\\\']+)',body)))[:250]
+                      api_matches=list(re.finditer(r"""url\\s*:\\s*["'](/api/[^"']+)""",body))
+                      entry["api_functions"]=[{"context":body[max(0,m.start()-220):min(len(body),m.end()+500)]} for m in api_matches[:200]]
+                      entry["all_api_paths"]=list(dict.fromkeys(m.group(1) for m in api_matches))[:250]
                       entry["js_excerpt"]=body[:500] if not found else ""
                       for s in found:
                           if s.startswith("/") and not s.startswith("//") and re.search(r"(api|product|goods|catalog|login)",s,re.I):
