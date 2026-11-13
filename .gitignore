@@ -7,3 +7,7 @@ venv/
 .env
 .env.*
 !.env.example
+# Telegram personal-account authorization material
+private/
+*.session
+*.session-journal
