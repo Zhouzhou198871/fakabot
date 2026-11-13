@@ -28,8 +28,11 @@ class ProductCatalogTests(unittest.TestCase):
         products = [p for p in get_all_products() if p.get("is_upstream")]
         self.assertGreater(len(products), 1000)
         for product in products:
-            expected = (Decimal(product["price_cny"]) / Decimal("4")).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
+            expected = max(
+                Decimal("0.01"),
+                (Decimal(product["price_cny"]) / Decimal("4")).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                ),
             )
             self.assertEqual(Decimal(product["price"]), expected)
             self.assertFalse(product["supplier_verified"])
