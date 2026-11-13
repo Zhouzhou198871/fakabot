@@ -99,6 +99,7 @@ export default {
       !incoming.pathname.startsWith("/api/") &&
       !incoming.pathname.startsWith("/assets/") &&
       !incoming.pathname.startsWith("/_internal_") &&
+      incoming.pathname !== "/_proxy_health" &&
       !/\\.[a-zA-Z0-9]{1,8}$/.test(incoming.pathname);
     if (isSpaRoute) {
       return new Response(SPA_HTML, { headers: {
@@ -137,8 +138,10 @@ export default {
     }
     if (incoming.pathname === "/_internal_probe") return json(await probe(env));
 
-    const target = new URL(ORIGIN);
-    target.pathname = incoming.pathname;
+    // All supplier API calls use the IPv4-only relay, not Worker-to-origin fetch.
+    const useRelay = incoming.pathname.startsWith("/api/");
+    const target = new URL(useRelay ? "https://relay.lynli.me" : ORIGIN);
+    target.pathname = useRelay ? "/_supplier" + incoming.pathname : incoming.pathname;
     target.search = incoming.search;
     const headers = new Headers(request.headers);
     headers.delete("host");
@@ -146,15 +149,12 @@ export default {
     headers.set("referer", ORIGIN + "/");
     headers.delete("cf-connecting-ip");
 
-    const relayLogin = incoming.pathname === "/api/user/loginjwt" && request.method === "POST";
-    const upstream = await fetch(new Request(
-      relayLogin ? "https://relay.lynli.me/_supplier/login" : target.toString(), {
-        method: request.method,
-        headers,
-        body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-        redirect: "manual",
-      }
-    ));
+    const upstream = await fetch(new Request(target.toString(), {
+      method: request.method,
+      headers,
+      body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+      redirect: "manual",
+    }));
 
     if (incoming.pathname === "/api/user/loginjwt" && request.method === "POST" && upstream.ok) {
       try {
