@@ -212,6 +212,21 @@ class SupplierClientTests(unittest.TestCase):
 
 
 
+    def test_get_order_reads_existing_order_without_purchase(self):
+        client, http = self.make_client([
+            {"Code": 200, "Data": {"Content": "recovered-content", "ShipStatus": "已发货"}},
+        ])
+        result = client.get_order("UP-EXISTING")
+        self.assertEqual(result["supplier_order_id"], "UP-EXISTING")
+        self.assertEqual(result["content"], "recovered-content")
+        self.assertEqual(len(http.calls), 1)
+        self.assertEqual(http.calls[0][0], "POST")
+        self.assertTrue(http.calls[0][1].endswith("/api/sysorder/getorder"))
+        self.assertEqual(http.calls[0][2], {"orderId": "UP-EXISTING"})
+        self.assertNotIn("/api/sysorder/buy", [c[1] for c in http.calls])
+
+
+
 if __name__ == "__main__":
     unittest.main()
 
