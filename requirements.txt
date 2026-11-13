@@ -1,3 +1,7 @@
 pyTelegramBotAPI>=4.20.0,<5.0.0
 requests>=2.32.0,<3.0.0
 qrcode[pil]>=7.4.2,<9.0.0
+
+cryptography>=42,<47
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
