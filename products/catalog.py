@@ -58,7 +58,7 @@ def _load_upstream_catalog():
                 continue
             try:
                 cost = Decimal(str(row.get("price_cny", "0")))
-                sell = (cost / Decimal("4")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                sell = max(Decimal("0.01"), (cost / Decimal("4")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
             except Exception:
                 continue
             sell_text = format(sell, ".2f")
