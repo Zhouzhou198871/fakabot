@@ -22,7 +22,7 @@ class PaymentFlowTests(unittest.TestCase):
         os.environ["TRON_RECEIVE_ADDRESS"] = "T" + "A" * 33
         try:
             first, _ = create_payment_order(101, {"id":"p1","name":"商品","price":"2.00","supplier_verified":True}, self.load, self.save)
-            second, _ = create_payment_order(102, {"id":"p1","name":"商品","price":"2.00"}, self.load, self.save)
+            second, _ = create_payment_order(102, {"id":"p1","name":"商品","price":"2.00","supplier_verified":True}, self.load, self.save)
             self.assertNotEqual(first["amount_raw"], second["amount_raw"])
             self.assertEqual(len(first["amount_raw"]), len(str(int(float(first["amount"]) * 1000000))))
             self.assertEqual(first["payment_status"], "pending")
