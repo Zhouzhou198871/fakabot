@@ -157,6 +157,23 @@ class DahaoshangClient:
             raise SupplierError("大号商支付方式响应格式错误。")
         return data
 
+    def get_order(self, order_id):
+        """Read an existing supplier order; this method never creates purchases."""
+        order = self._request(
+            "POST", "/api/sysorder/getorder",
+            params={"orderId": str(order_id)}, body=None,
+        )
+        if not isinstance(order, dict):
+            raise SupplierDeliveryPending(order_id)
+        content = order.get("Content")
+        if not isinstance(content, str) or not content.strip():
+            raise SupplierDeliveryPending(order_id)
+        return {
+            "supplier_order_id": str(order_id),
+            "content": content,
+            "supplier_status": order.get("ShipStatus"),
+        }
+
     @staticmethod
     def _choose_balance_method(methods):
         markers = ("余额支付", "账户余额", "余额付款", "balance", "wallet balance")
@@ -229,20 +246,8 @@ class DahaoshangClient:
         if not order_id:
             raise SupplierError("上游下单响应缺少订单 ID；请人工核对，不要重试。")
 
-        order = self._request(
-            "POST", "/api/sysorder/getorder",
-            params={"orderId": str(order_id)}, body=None,
-        )
-        if not isinstance(order, dict):
-            raise SupplierDeliveryPending(order_id)
-        content = order.get("Content")
-        if not isinstance(content, str) or not content.strip():
-            raise SupplierDeliveryPending(order_id)
-        return {
-            "supplier_order_id": str(order_id),
-            "supplier_order_no": str(entity.get("OrderNo") or data.get("OrderNo") or ""),
-            "content": content,
-            "supplier_status": order.get("ShipStatus"),
-        }
+        result = self.get_order(order_id)
+        result["supplier_order_no"] = str(entity.get("OrderNo") or data.get("OrderNo") or "")
+        return result
 
 [executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
