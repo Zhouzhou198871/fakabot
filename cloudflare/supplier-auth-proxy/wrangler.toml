@@ -1,0 +1,8 @@
+name = "supplier-auth-proxy"
+main = "worker.js"
+compatibility_date = "2026-11-13"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fakabot-procurement-db"
+database_id = "fb8bf149-abc2-4f05-96e5-0735db7fa8fc"
