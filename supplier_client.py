@@ -1,0 +1,192 @@
+# -*- coding: utf-8 -*-
+"""Authenticated Dahaoshang client.
+
+Only use a verified local session file. Purchase is deliberately balance-only:
+the client refuses to create an order if the supplier does not expose a usable
+account-balance payment method. It never signs or broadcasts cryptocurrency.
+"""
+import json
+import os
+import stat
+from pathlib import Path
+
+import requests
+
+
+BASE_URL = "https://dahaoshang.com"
+DEFAULT_SESSION_FILE = Path("/root/.config/fakabot/dahaoshang_session.json")
+
+
+class SupplierError(RuntimeError):
+    pass
+
+
+class SupplierDeliveryPending(SupplierError):
+    def __init__(self, order_id):
+        self.order_id = str(order_id)
+        super().__init__("上游订单已创建，但尚未取得可交付内容；禁止重复采购。订单号：" + self.order_id)
+
+
+class DahaoshangClient:
+    def __init__(self, session_file=DEFAULT_SESSION_FILE, http=None, timeout=20):
+        self.session_file = Path(session_file)
+        self.timeout = timeout
+        self.http = http or requests.Session()
+        self._load_session()
+
+    def _load_session(self):
+        if not self.session_file.is_file():
+            raise SupplierError("缺少大号商登录会话；请先完成本机安全登录验证。")
+        mode = stat.S_IMODE(self.session_file.stat().st_mode)
+        if mode & 0o077:
+            raise SupplierError("大号商会话文件权限过宽，拒绝读取。")
+        try:
+            payload = json.loads(self.session_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SupplierError("大号商会话文件无法解析。") from exc
+        token = payload.get("access_token") if isinstance(payload, dict) else None
+        base = payload.get("base_url", BASE_URL) if isinstance(payload, dict) else BASE_URL
+        if not isinstance(token, str) or not token.strip():
+            raise SupplierError("大号商会话中没有有效令牌。")
+        if base.rstrip("/") != BASE_URL:
+            raise SupplierError("会话目标站点与固定上游地址不一致，拒绝请求。")
+        self.base_url = BASE_URL
+        self.http.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token.strip(),
+            "User-Agent": "Mozilla/5.0 (compatible; FakabotSupplierConnector/1.0)",
+        })
+
+    def _request(self, method, path, *, params=None, body=None):
+        try:
+            response = self.http.request(
+                method, self.base_url + path, params=params, json=body,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise SupplierError("大号商接口请求失败：" + type(exc).__name__) from exc
+        except ValueError as exc:
+            raise SupplierError("大号商接口返回非 JSON 数据。") from exc
+        if not isinstance(payload, dict) or payload.get("Code") != 200:
+            message = payload.get("Message", "未知接口错误") if isinstance(payload, dict) else "响应格式错误"
+            raise SupplierError("大号商接口未成功：" + str(message)[:160])
+        return payload.get("Data")
+
+    def get_user_info(self):
+        data = self._request("POST", "/api/user/getuserinfo", body={})
+        if not isinstance(data, dict) or not data:
+            raise SupplierError("大号商登录令牌校验失败。")
+        return data
+
+    def get_categories(self):
+        data = self._request("GET", "/api/syscategory/getcategorylist")
+        if not isinstance(data, list):
+            raise SupplierError("大号商分类响应格式错误。")
+        return data
+
+    def get_product(self, product_id):
+        data = self._request(
+            "GET", "/api/sysproduct/getproduct",
+            params={"productId": str(product_id)},
+        )
+        if not isinstance(data, dict):
+            raise SupplierError("大号商商品详情响应格式错误。")
+        return data
+
+    def get_payment_methods(self, category_id, email=""):
+        data = self._request(
+            "GET", "/api/syspaytype/getpaymethod",
+            params={"categoryId": str(category_id), "email": str(email or "")},
+        )
+        if not isinstance(data, list):
+            raise SupplierError("大号商支付方式响应格式错误。")
+        return data
+
+    @staticmethod
+    def _choose_balance_method(methods):
+        markers = ("余额支付", "账户余额", "余额付款", "balance", "wallet balance")
+        matches = []
+        for method in methods:
+            if not isinstance(method, dict) or method.get("Disabled") is True:
+                continue
+            label = " ".join(str(method.get(k) or "") for k in ("Text", "Name", "Title")).lower()
+            if any(marker in label for marker in markers):
+                matches.append(method)
+        if len(matches) != 1 or not matches[0].get("Value"):
+            raise SupplierError("上游没有唯一且可用的账户余额支付方式；为避免产生待付款订单，已拒绝采购。")
+        return matches[0]
+
+    def buy_with_balance(self, product_id, quantity=1, model_id=None, email=""):
+        """Create one supplier purchase and return verified order content.
+
+        Do not automatically retry this method after a timeout: the upstream
+        order may have been created even if the response was lost.
+        """
+        quantity = int(quantity)
+        if quantity < 1:
+            raise ValueError("quantity 必须大于 0")
+        product = self.get_product(product_id)
+        if product.get("IsOnSale") is not True:
+            raise SupplierError("上游商品当前未上架，拒绝采购。")
+
+        models = product.get("ProductModels") or []
+        selected_model = None
+        if model_id is not None:
+            selected_model = next((m for m in models if str(m.get("ID")) == str(model_id)), None)
+            if selected_model is None:
+                raise SupplierError("指定的上游商品规格不存在。")
+        elif len(models) == 1:
+            selected_model = models[0]
+        elif len(models) > 1:
+            available = [m for m in models if int(m.get("Qty") or 0) >= quantity]
+            if len(available) == 1:
+                selected_model = available[0]
+            else:
+                raise SupplierError("上游商品有多个规格，必须明确指定规格后才能采购。")
+
+        if selected_model is not None and int(selected_model.get("Qty") or 0) < quantity:
+            raise SupplierError("所选上游规格库存不足。")
+        if selected_model is None and int(product.get("InStock") or 0) < quantity:
+            raise SupplierError("上游商品库存不足。")
+
+        category_id = product.get("CategoryId")
+        if not category_id:
+            raise SupplierError("上游商品缺少分类 ID，无法确定支付方式。")
+        methods = self.get_payment_methods(category_id, email=email)
+        pay_method = self._choose_balance_method(methods)
+
+        body = {
+            "ProductId": product.get("ID"),
+            "PayTypeId": pay_method["Value"],
+            "Qty": quantity,
+            "Email": str(email).strip() or None,
+        }
+        if selected_model is not None:
+            body["ModelId"] = selected_model.get("ID")
+
+        data = self._request("POST", "/api/sysorder/buy", body=body)
+        if not isinstance(data, dict):
+            raise SupplierError("上游下单响应格式错误；禁止自动重试。")
+        entity = data.get("Entity") if isinstance(data.get("Entity"), dict) else {}
+        order_id = entity.get("ID") or data.get("ID")
+        if not order_id:
+            raise SupplierError("上游下单响应缺少订单 ID；请人工核对，不要重试。")
+
+        order = self._request(
+            "POST", "/api/sysorder/getorder",
+            params={"orderId": str(order_id)}, body=None,
+        )
+        if not isinstance(order, dict):
+            raise SupplierDeliveryPending(order_id)
+        content = order.get("Content")
+        if not isinstance(content, str) or not content.strip():
+            raise SupplierDeliveryPending(order_id)
+        return {
+            "supplier_order_id": str(order_id),
+            "supplier_order_no": str(entity.get("OrderNo") or data.get("OrderNo") or ""),
+            "content": content,
+            "supplier_status": order.get("ShipStatus"),
+        }

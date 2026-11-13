@@ -60,4 +60,83 @@ class PaymentFlowTests(unittest.TestCase):
         self.assertEqual(self.orders[0]["payment_status"],"paid")
         self.assertEqual(self.orders[0]["txid"],"abc")
 
-if __name__ == "__main__": unittest.main()
+    def test_paid_order_auto_delivers_once_when_explicitly_enabled(self):
+        import os
+        from payment_flow import handle_confirmed_payment
+        old = os.environ.get("SUPPLIER_AUTOPROCUREMENT_ENABLED")
+        os.environ["SUPPLIER_AUTOPROCUREMENT_ENABLED"] = "1"
+        class FakeSupplier:
+            def __init__(self): self.calls = 0
+            def buy_with_balance(self, product_id, quantity=1, model_id=None, email=""):
+                self.calls += 1
+                return {
+                    "supplier_order_id": "UP-1",
+                    "supplier_order_no": "NO-1",
+                    "content": "test-delivery-content",
+                }
+        class FakeBot:
+            def __init__(self): self.messages = []
+            def send_message(self, *args, **kwargs): self.messages.append((args, kwargs))
+        supplier, bot = FakeSupplier(), FakeBot()
+        self.orders = [{
+            "order_id": "QT-AUTO-1", "user_id": "1", "amount": 2.000001,
+            "payment_status": "pending", "status": "pending_payment",
+            "supplier_product_id": "P1", "supplier_quantity": 1,
+        }]
+        try:
+            self.assertTrue(handle_confirmed_payment(
+                bot, "QT-AUTO-1",
+                {"txid": "tx-auto", "amount_raw": "2000001"},
+                self.load, self.save, supplier_client_factory=lambda: supplier,
+            ))
+            self.assertEqual(self.orders[0]["procurement_status"], "delivered")
+            self.assertEqual(self.orders[0]["status"], "delivered")
+            self.assertEqual(self.orders[0]["delivery_content"], "test-delivery-content")
+            self.assertEqual(supplier.calls, 1)
+            self.assertFalse(handle_confirmed_payment(
+                bot, "QT-AUTO-1", {"txid": "tx-auto"},
+                self.load, self.save, supplier_client_factory=lambda: supplier,
+            ))
+            self.assertEqual(supplier.calls, 1)
+            self.assertTrue(any("test-delivery-content" in str(x) for x in bot.messages))
+        finally:
+            if old is None: os.environ.pop("SUPPLIER_AUTOPROCUREMENT_ENABLED", None)
+            else: os.environ["SUPPLIER_AUTOPROCUREMENT_ENABLED"] = old
+
+    def test_supplier_order_pending_delivery_is_never_purchased_twice(self):
+        import os
+        from payment_flow import handle_confirmed_payment
+        from supplier_client import SupplierDeliveryPending
+        old = os.environ.get("SUPPLIER_AUTOPROCUREMENT_ENABLED")
+        os.environ["SUPPLIER_AUTOPROCUREMENT_ENABLED"] = "1"
+        class FakeSupplier:
+            def __init__(self): self.calls = 0
+            def buy_with_balance(self, *args, **kwargs):
+                self.calls += 1
+                raise SupplierDeliveryPending("UP-PENDING-1")
+        class FakeBot:
+            def send_message(self, *args, **kwargs): pass
+        supplier = FakeSupplier()
+        self.orders = [{
+            "order_id": "QT-AUTO-2", "user_id": "1", "amount": 2.000001,
+            "payment_status": "pending", "status": "pending_payment",
+            "supplier_product_id": "P1", "supplier_quantity": 1,
+        }]
+        try:
+            self.assertTrue(handle_confirmed_payment(
+                FakeBot(), "QT-AUTO-2", {"txid": "tx-auto-2"},
+                self.load, self.save, supplier_client_factory=lambda: supplier,
+            ))
+            self.assertEqual(self.orders[0]["procurement_status"], "supplier_order_pending_delivery")
+            self.assertEqual(self.orders[0]["supplier_order_id"], "UP-PENDING-1")
+            self.assertFalse(handle_confirmed_payment(
+                FakeBot(), "QT-AUTO-2", {"txid": "tx-auto-2"},
+                self.load, self.save, supplier_client_factory=lambda: supplier,
+            ))
+            self.assertEqual(supplier.calls, 1)
+        finally:
+            if old is None: os.environ.pop("SUPPLIER_AUTOPROCUREMENT_ENABLED", None)
+            else: os.environ["SUPPLIER_AUTOPROCUREMENT_ENABLED"] = old
+
+if __name__ == "__main__":
+    unittest.main()
