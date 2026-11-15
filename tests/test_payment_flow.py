@@ -12,13 +12,13 @@ class PaymentFlowTests(unittest.TestCase):
         self.orders = [dict(x) for x in rows]
 
     def test_unverified_product_is_blocked_before_payment_order_creation(self):
-        with self.assertRaisesRegex(Exception, "自动采购验证"):
+        with self.assertRaisesRegex(Exception, "商品信息核验"):
             create_payment_order(101, {"id":"p1","name":"商品","price":"2.00","supplier_verified":False}, self.load, self.save)
         self.assertEqual(self.orders, [])
 
     def test_verified_catalog_without_ready_procurement_is_blocked(self):
         product = {"id":"p1","name":"商品","price":"2.00","supplier_verified":True,"procurement_ready":False,"supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100","supplier_price_cny":"8.00"}
-        with self.assertRaisesRegex(Exception, "自动采购验证"):
+        with self.assertRaisesRegex(Exception, "商品信息核验"):
             create_payment_order(101, product, self.load, self.save)
         self.assertEqual(self.orders, [])
 
@@ -29,7 +29,7 @@ class PaymentFlowTests(unittest.TestCase):
             "supplier_product_id":"DH-100","supplier_url":"https://dahaoshang.com/item/100",
             "supplier_price_cny":"8.00"
         }
-        with self.assertRaisesRegex(Exception, "利润规则不一致"):
+        with self.assertRaisesRegex(Exception, "商品售价配置不一致"):
             create_payment_order(101, product, self.load, self.save)
         self.assertEqual(self.orders, [])
 
@@ -265,17 +265,22 @@ class PaymentFlowTests(unittest.TestCase):
             pass
 
     def test_long_delivery_is_split_into_telegram_safe_plain_text_chunks(self):
-        from payment_flow import _notify
+        from types import SimpleNamespace
+        from payment_flow import _notify_delivery, _split_delivery_content
         class FakeBot:
             def __init__(self): self.messages=[]
+            def get_chat(self, uid): return SimpleNamespace(first_name="Buyer", last_name="", username="buyer")
             def send_message(self, *args, **kwargs): self.messages.append((args, kwargs))
         bot = FakeBot()
         content = "A" * 8000
-        self.assertTrue(_notify(bot, "123", content))
-        self.assertGreaterEqual(len(bot.messages), 3)
+        chunks = _split_delivery_content(content)
+        self.assertGreaterEqual(len(chunks), 3)
+        self.assertEqual("".join(chunks), content)
+        order = {"user_id":"123", "order_id":"QT123", "product_name":"商品", "delivery_content":content}
+        self.assertTrue(_notify_delivery(bot, order))
+        self.assertEqual(len(bot.messages), len(chunks))
         self.assertTrue(all(len(x[0][1]) <= 3500 for x in bot.messages))
-        self.assertTrue(all(x[1].get("parse_mode") is None for x in bot.messages))
-        self.assertEqual("".join(x[0][1] for x in bot.messages), content)
+        self.assertTrue(all(x[1].get("parse_mode") == "HTML" for x in bot.messages))
 
     def test_failed_telegram_delivery_is_marked_pending_and_retried_without_repurchase(self):
         import os
@@ -329,13 +334,14 @@ class DualPaymentTests(unittest.TestCase):
             "supplier_product_id":"DH-1", "supplier_url":"https://example.com/item",
             "supplier_price_cny":"8.00"}
         from unittest.mock import patch
-        with patch("alipay_gateway.build_page_pay_url", return_value="https://sandbox.example/pay?out_trade_no=ALTEST"):
-            order, text = create_alipay_order(123, product, lambda: list(orders),
-                lambda rows: orders.__setitem__(slice(None), rows))
+        order, text = create_alipay_order(123, product, lambda: list(orders),
+            lambda rows: orders.__setitem__(slice(None), rows), mode_override="stateless_gateway")
         self.assertEqual(order["payment_method"], "alipay_gateway")
         self.assertEqual(order["amount_cny"], "16.00")
         self.assertEqual(order["exchange_rate"], "8")
-        self.assertEqual(order["payment_verification"], "provider_notification_required")
+        self.assertEqual(order["payment_verification"], "stateless_gateway_webhook")
         self.assertIn("¥16.00", text)
-        self.assertEqual(order["payment_url"], "https://sandbox.example/pay?out_trade_no=ALTEST")
+        self.assertEqual(order["payment_url"], "personal_qr")
         self.assertEqual(order["payment_status"], "pending")
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

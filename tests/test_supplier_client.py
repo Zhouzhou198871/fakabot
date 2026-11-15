@@ -160,11 +160,12 @@ class SupplierClientTests(unittest.TestCase):
             }},
             {"Code": 200, "Data": [{"Text": "余额支付", "Value": "BAL"}]},
             {"Code": 200, "Data": {"ID": "O1"}},
-            {"Code": 200, "Data": {"Content": ""}},
+            *[{"Code": 200, "Data": {"Content": ""}} for _ in range(5)],
         ]
         client, _ = self.make_client(responses)
-        with self.assertRaises(SupplierDeliveryPending) as caught:
-            client.buy_with_balance("P1")
+        with patch("supplier_client.time.sleep", return_value=None):
+            with self.assertRaises(SupplierDeliveryPending) as caught:
+                client.buy_with_balance("P1")
         self.assertEqual(caught.exception.order_id, "O1")
 
 
@@ -314,3 +315,5 @@ class SupplierClientTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

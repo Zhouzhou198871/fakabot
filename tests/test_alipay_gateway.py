@@ -18,7 +18,7 @@ class AlipayGatewayTests(unittest.TestCase):
             url = build_page_pay_url('ALTEST001', '16.00', 'test item', app_id='sandbox-app',
                 private_key_path=str(path), notify_url='https://notify.example/notify')
         parsed = urlparse(url)
-        self.assertEqual(parsed.netloc, 'openapi.alipaydev.com')
+        self.assertEqual(parsed.netloc, 'openapi-sandbox.dl.alipaydev.com')
         params = {k:v[0] for k,v in parse_qs(parsed.query).items()}
         signature = base64.b64decode(params.pop('sign'))
         message = '&'.join(f'{k}={params[k]}' for k in sorted(params))
@@ -35,3 +35,5 @@ class AlipayGatewayTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import stat
+import time
 from pathlib import Path
 
 import requests
@@ -331,6 +332,21 @@ class DahaoshangClient:
         if not order_id:
             raise SupplierError("上游下单响应缺少订单 ID；请人工核对，不要重试。")
 
-        result = self.get_order(order_id)
-        result["supplier_order_no"] = str(entity.get("OrderNo") or data.get("OrderNo") or "")
-        return result
+        # The supplier may confirm payment/create the order before its Content is
+        # visible. Never repeat /buy here: poll only the known order ID.
+        last_lookup_error = None
+        for attempt in range(1, 6):
+            time.sleep(3)
+            try:
+                result = self.get_order(order_id)
+                result["supplier_order_no"] = str(entity.get("OrderNo") or data.get("OrderNo") or "")
+                return result
+            except SupplierError as exc:
+                # Preserve the confirmed upstream order ID for the existing
+                # reconciliation worker, including transient not-found responses.
+                last_lookup_error = exc
+                if attempt < 5:
+                    continue
+        raise SupplierDeliveryPending(order_id) from last_lookup_error
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

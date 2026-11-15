@@ -1,13 +1,64 @@
-users.json
-orders.json
-withdrawals.json
-*.log
-__pycache__/
-venv/
+# Secrets and runtime credentials
 .env
 .env.*
 !.env.example
-# Telegram personal-account authorization material
-private/
+.catalog_sync_token
+*.pem
+*.key
 *.session
 *.session-journal
+private/
+
+# Virtual environments and Python caches
+venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Runtime business data and caches (never publish user/card data)
+users.json
+orders.json
+withdrawals.json
+data/
+products/upstream_catalog.json
+*.db
+*.sqlite
+*.sqlite3
+*.log
+bot.pid
+*.attempted
+
+# Card/credential exports: deny all text files except dependency manifest
+*.txt
+!requirements.txt
+
+# Local payment material and personal assets
+alipay_receive_qr.*
+
+# Development backups and temporary scripts
+*.bak
+*.bak.*
+*.before_*
+*.save
+*.tmp
+
+*.bak_*
+*.pre_*
+
+# Never publish local structured data snapshots or data exports
+*.json
+*.json.*
+!tests/fixtures/*.json
+*.env
+*.env.*
+.secrets/
+.credentials/
+*.secret
+bot_profile_photo.*
+*.p12
+*.pfx
+*.crt
+.ssh/
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

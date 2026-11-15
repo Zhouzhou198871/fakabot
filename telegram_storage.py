@@ -109,6 +109,24 @@ class TelegramArchiveStore:
             self.version += 1
             self.dirty = True
 
+    def save_many(self, values):
+        """Atomically replace multiple business collections in one in-memory snapshot."""
+        if not isinstance(values, dict) or not values:
+            raise TypeError("values 必须是非空字典")
+        for key, value in values.items():
+            if key not in self.KEYS:
+                raise ValueError("未知归档数据类型：" + str(key))
+            expected = dict if key in ("users", "meta") else list
+            if not isinstance(value, expected):
+                raise TypeError(key + " 数据类型不正确")
+        with self.lock:
+            if not self.initialized:
+                raise RuntimeError("Telegram 归档存储尚未初始化")
+            for key, value in values.items():
+                self.data[key] = copy.deepcopy(value)
+            self.version += 1
+            self.dirty = True
+
     def increment_counter(self, name, amount=1):
         """Atomically increment a lightweight operational counter without network I/O."""
         with self.lock:
@@ -132,7 +150,9 @@ class TelegramArchiveStore:
 
     def flush(self, reason="定时归档"):
         """Persist a consistent snapshot without blocking readers/writers on Telegram network I/O."""
-        with self.persist_lock:
+        if not self.persist_lock.acquire(timeout=15):
+            raise TimeoutError("Telegram 归档持久化锁等待超过 15 秒")
+        try:
             with self.lock:
                 if not self.initialized or not self.dirty:
                     return False
@@ -143,13 +163,20 @@ class TelegramArchiveStore:
                 if self.version == version:
                     self.dirty = False
             return True
+        finally:
+            self.persist_lock.release()
 
-    def flush_loop(self, interval=5):
+    def flush_loop(self, interval=5, on_error=None):
         while True:
             try:
                 self.flush()
             except Exception as exc:
                 print("Telegram archive background flush failed:", repr(exc), flush=True)
+                if callable(on_error):
+                    try:
+                        on_error(exc)
+                    except Exception as alert_exc:
+                        print("Telegram archive alert callback failed:", type(alert_exc).__name__, flush=True)
             time.sleep(max(1, int(interval)))
 
     def send_report_snapshot(self, report_text, report_title="工作汇报"):
@@ -226,3 +253,5 @@ class TelegramArchiveStore:
             disable_notification=True,
         )
         self.archive_message_id = message.message_id
+
+[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
