@@ -1,3 +1,4 @@
+
 import base64
 import tempfile
 import unittest
@@ -35,5 +36,3 @@ class AlipayGatewayTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

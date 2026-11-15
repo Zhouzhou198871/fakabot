@@ -1,3 +1,4 @@
+
 """Optional, least-privilege Telegram Premium user-account bridge.
 
 The bot remains the primary account. This client is only for MTProto operations
@@ -74,5 +75,3 @@ def disconnect():
         if _CLIENT is not None:
             _CLIENT.disconnect()
             _CLIENT = None
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

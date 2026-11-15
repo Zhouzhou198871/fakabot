@@ -1,3 +1,4 @@
+
 # Secrets and runtime credentials
 .env
 .env.*
@@ -60,5 +61,3 @@ bot_profile_photo.*
 *.pfx
 *.crt
 .ssh/
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

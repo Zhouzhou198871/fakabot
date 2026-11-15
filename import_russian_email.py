@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """Import Russian mailbox credentials: one credential per line; never prints credentials."""
 import argparse
@@ -35,5 +36,3 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

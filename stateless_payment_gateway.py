@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """Client and authenticated webhook receiver for the stateless payment gateway."""
 import hashlib
@@ -327,5 +328,3 @@ def gateway_order_worker_loop(bot, load_orders, save_orders, flush_orders, admin
         except Exception as exc:
             log.exception("gateway order worker iteration failed: %s", type(exc).__name__)
         time.sleep(2)
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

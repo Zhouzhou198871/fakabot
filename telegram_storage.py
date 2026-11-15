@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """Telegram private-channel snapshot storage.
 
@@ -253,5 +254,3 @@ class TelegramArchiveStore:
             disable_notification=True,
         )
         self.archive_message_id = message.message_id
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

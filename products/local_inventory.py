@@ -1,3 +1,4 @@
+
 """Local-only Russian mailbox stock. This module never contacts any supplier."""
 import hashlib
 import json
@@ -187,5 +188,3 @@ def import_cards(lines):
         _write(data)
         return {"input": len(cleaned), "added": added, "duplicates": duplicates,
                 "available": sum(1 for x in data["cards"] if x.get("status") == "available")}
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

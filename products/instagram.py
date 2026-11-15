@@ -1,3 +1,4 @@
+
 """INSTAGRAM_PRODUCTS catalog data."""
 PRODUCTS = [
     {"id": "ig1971", "name": "Instagram账号｜注册10-12个月｜已设置2FA", "price_cny": "2.49", "price_usdt": "0.62", "price": "0.62", "supplier_verified": False},

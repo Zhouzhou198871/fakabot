@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """Alipay Open Platform RSA2 page-pay URL builder (sandbox by default)."""
 import base64
@@ -203,5 +204,3 @@ def create_precreate_qr(order_id, amount_cny, subject, app_id=None,
     if not qr_code.startswith("https://"):
         raise RuntimeError("支付宝未返回有效的官方二维码内容")
     return qr_code, result
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

@@ -1,3 +1,4 @@
+
 """Cloudflare edge catalog client with a safe local-snapshot fallback."""
 import json
 import threading

@@ -1,3 +1,4 @@
+
 import os
 import tempfile
 import threading
@@ -80,7 +81,16 @@ class ProductionSafetyTests(unittest.TestCase):
         self.assertIsInstance(alerts[0], TimeoutError)
 
 
+    def test_business_rejections_are_not_critical_alerts(self):
+        import bot
+        for message in (
+            "order_not_found", "business_order_not_found", "订单不存在",
+            "余额不足", "商品已售罄",
+        ):
+            self.assertTrue(bot._is_expected_business_rejection(RuntimeError(message)))
+        self.assertFalse(bot._is_expected_business_rejection(ConnectionError("network unreachable")))
+        self.assertFalse(bot._is_expected_business_rejection(RuntimeError("HTTP 500 upstream unavailable")))
+
+
 if __name__ == "__main__":
     unittest.main()
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

@@ -1,3 +1,4 @@
+
 """TG_PRODUCTS catalog data."""
 PRODUCTS = [
     {"id": "t1", "name": "✈️ 美国 +1 成品号", "price_cny": "4.5", "price_usdt": "1.13", "price": "1.13", "supplier_verified": False},

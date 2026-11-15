@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """TRON TRC20 USDT payment watcher.
 
@@ -333,5 +334,3 @@ class PaymentWatcher:
                         break
             except Exception:
                 logger.exception("解析单笔链上转账失败")
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

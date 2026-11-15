@@ -1,3 +1,4 @@
+
 import unittest
 from payment_flow import create_payment_order, handle_confirmed_payment
 
@@ -343,5 +344,3 @@ class DualPaymentTests(unittest.TestCase):
         self.assertIn("¥16.00", text)
         self.assertEqual(order["payment_url"], "personal_qr")
         self.assertEqual(order["payment_status"], "pending")
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

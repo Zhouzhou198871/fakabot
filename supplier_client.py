@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """Authenticated Dahaoshang client.
 
@@ -348,5 +349,3 @@ class DahaoshangClient:
                 if attempt < 5:
                     continue
         raise SupplierDeliveryPending(order_id) from last_lookup_error
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

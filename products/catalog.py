@@ -1,3 +1,4 @@
+
 """Central registry for configured and live supplier product catalogs."""
 import json
 import os
@@ -329,5 +330,3 @@ def start_cloudflare_catalog_refresh(interval=300):
     """Refresh the edge catalog in the background without blocking bot callbacks."""
     from .cloudflare_catalog import start_refresh_loop
     return start_refresh_loop(refresh_cloudflare_catalog, interval=interval)
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

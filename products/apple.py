@@ -1,3 +1,4 @@
+
 """APPLE_PRODUCTS catalog data."""
 PRODUCTS = [
     {"id": "a1", "name": "美区共享号｜已购小火箭", "price_cny": "2.78", "price_usdt": "0.69", "price": "0.69", "supplier_verified": False},

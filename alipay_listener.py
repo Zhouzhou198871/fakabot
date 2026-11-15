@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """Alipay RSA2 asynchronous notification verification core.
 
@@ -384,5 +385,3 @@ def process_alipay_fund_order_changed(event, alipay_public_key_pem, expected_app
     return {"ok": True, "event_type": "alipay_fund_order_changed",
             "remark_order_candidate": remark if matched_order else None,
             "amount": amount, "payment_ref": trade_no, "status": status}
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]

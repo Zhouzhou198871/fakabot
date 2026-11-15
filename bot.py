@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 import telebot, time, json, os, re, html, io, hashlib, zipfile, copy, unicodedata, inspect, threading, fcntl, sys
 from datetime import datetime, timedelta
@@ -37,7 +38,27 @@ _CRITICAL_ALERT_LAST = {}
 _ACTION_DEBOUNCE_LOCK = threading.Lock()
 _ACTION_DEBOUNCE_LAST = {}
 
+def _is_expected_business_rejection(exc):
+    """Return True for normal payment/order validation outcomes, not outages."""
+    parts = [type(exc).__name__, str(exc or "")]
+    response = getattr(exc, "response", None)
+    if response is not None:
+        parts.append(str(getattr(response, "text", "") or ""))
+        parts.append(str(getattr(response, "status_code", "") or ""))
+    message = " ".join(parts).casefold()
+    expected_markers = (
+        "order_not_found", "business_order_not_found", "订单不存在",
+        "余额不足", "insufficient balance", "商品已售罄", "商品已缺货",
+        "out of stock", "sold out", "already paid", "订单已支付",
+        "duplicate notification", "重复回调", "invalid order state",
+    )
+    return any(marker in message for marker in expected_markers)
+
+
 def _notify_admin_critical(category, exc, context=""):
+    if _is_expected_business_rejection(exc):
+        print("BUSINESS_REJECTION_IGNORED", str(category), type(exc).__name__, flush=True)
+        return False
     admin_id = str(_CRITICAL_ALERT_ADMIN_ID or "").strip()
     if not admin_id.isdigit():
         print("CRITICAL_ALERT_ADMIN_NOT_CONFIGURED", category, flush=True)
@@ -4538,5 +4559,3 @@ if __name__ == "__main__":
         print("❌ 机器人 polling 异常：", repr(exc), flush=True)
         traceback.print_exc()
         raise
-
-[executed on device: iZj6cakb7vguedvzvbqrvbZ (14411471-502a-43de-a2d7-530edf7bf831)]
