@@ -731,10 +731,10 @@ def generate_main_text(user, uid):
         f'{premium_emoji("star", "✨")} <b>欢迎光临晴天号铺。</b>\n\n'
         f'{premium_emoji("diamond", "📌")} <b>您的专属账户信息</b>\n'
         f'├ {premium_emoji("gear", "🆔")} <b>用户 ID：</b> <code>{uid}</code>\n'
-        f'├ {premium_emoji(\"usdt\", \"💰\")} <b>账户余额：</b> <b>¥{price_cny(balance):.2f}</b>\n'
+        f'├ {premium_emoji("usdt", "💰")} <b>账户余额：</b> <b>¥{price_cny(balance):.2f}</b>\n'
         f'├ {premium_emoji("apple", "🛒")} <b>订单记录：</b> {orders} 单\n'
         f'├ {premium_emoji("tg", "👥")} <b>邀请用户：</b> {invited} 位\n'
-        f'└ {premium_emoji(\"gift\", \"🎁\")} <b>邀请奖励：</b> 累计 <b>¥{price_cny(bonus):.2f}</b>\n\n'
+        f'└ {premium_emoji("gift", "🎁")} <b>邀请奖励：</b> 累计 <b>¥{price_cny(bonus):.2f}</b>\n\n'
         f'━━━━━━━━━━━━━━━━\n'
         f'{premium_emoji("star", "🛒")} <b>自助选购</b>：点击下方按钮即可挑选。'
     )
