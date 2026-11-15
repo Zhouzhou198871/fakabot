@@ -44,12 +44,8 @@ def clean_button_text(value):
     return re.sub(r'\s+', ' ', value).strip()
 
 def storefront_button(text, **kwargs):
-    """Storefront category labels stay clean; never decorate brands with unrelated emoji."""
-    label = clean_button_text(text)
-    try:
-        return types.InlineKeyboardButton(text=label or "打开", **kwargs)
-    except TypeError:
-        return types.InlineKeyboardButton(text=label or "打开", **{k:v for k,v in kwargs.items() if k != "icon_custom_emoji_id"})
+    """Storefront buttons use Telegram's native custom-emoji icon field."""
+    return premium_button(text, **kwargs)
 
 
 def premium_button(text, **kwargs):
@@ -568,8 +564,8 @@ def get_account_kb(page=0):
             name = name[:15] + "…"
         category_icon = str(category.get("display_icon") or "🛍️")
         # Keep the category's brand icon in the visible Telegram button label.
-        buttons.append(types.InlineKeyboardButton(
-            text=f"{category_icon} {name}",
+        buttons.append(premium_button(
+            f"{category_icon} {name}",
             callback_data=f"list_{category['key']}"
         ))
     for index in range(0, len(buttons), 2):
@@ -587,7 +583,7 @@ def get_brand_group_kb(group_id):
     kb = types.InlineKeyboardMarkup(row_width=2)
     for brand_index, (brand_name, brand_emoji) in enumerate(group["brands"]):
         # Brand-specific Premium emoji IDs are intentionally not fabricated.
-        kb.add(types.InlineKeyboardButton(text=f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{brand_index}"))
+        kb.add(premium_button(f"{brand_emoji} {brand_name}", callback_data=f"brand_{group_id}_{brand_index}"))
     kb.row(premium_button("返回账号商城", callback_data="cat_account"))
     return kb
 
@@ -691,8 +687,8 @@ def get_products_kb(cat_id, page=0):
     )
     if cat_id in BRAND_GROUPS:
         brand_buttons = [
-            types.InlineKeyboardButton(
-                text=f"{get_catalog_product_icon(product, cat_id)} {product['name']}",
+            premium_button(
+                f"{get_catalog_product_icon(product, cat_id)} {product['name']}",
                 callback_data=f"brand_{cat_id}_{product['brand_index']}"
             )
             for product in selected
@@ -708,7 +704,7 @@ def get_products_kb(cat_id, page=0):
             # Resolve the brand icon for every item, including local and upstream catalogs.
             brand_icon = get_catalog_product_icon(product, cat_id)
             label = f"{brand_icon} {product_name} | ¥{price_cny(product['price']):.2f}"
-            kb.add(types.InlineKeyboardButton(text=label, callback_data=callback))
+            kb.add(premium_button(label, callback_data=callback))
     if not selected:
         kb.add(premium_button("暂无已登记商品", callback_data="show_support"))
     previous_page = max(0, page - 1)
@@ -735,10 +731,10 @@ def generate_main_text(user, uid):
         f'{premium_emoji("star", "✨")} <b>欢迎光临晴天号铺。</b>\n\n'
         f'{premium_emoji("diamond", "📌")} <b>您的专属账户信息</b>\n'
         f'├ {premium_emoji("gear", "🆔")} <b>用户 ID：</b> <code>{uid}</code>\n'
-        f'├ {premium_emoji("usdt", "💰")} <b>账户余额：</b> <b>{balance:.2f}</b> USDT\n'
+        f'├ {premium_emoji(\"usdt\", \"💰\")} <b>账户余额：</b> <b>¥{price_cny(balance):.2f}</b>\n'
         f'├ {premium_emoji("apple", "🛒")} <b>订单记录：</b> {orders} 单\n'
         f'├ {premium_emoji("tg", "👥")} <b>邀请用户：</b> {invited} 位\n'
-        f'└ {premium_emoji("gift", "🎁")} <b>邀请奖励：</b> 累计 {bonus:.2f} USDT\n\n'
+        f'└ {premium_emoji(\"gift\", \"🎁\")} <b>邀请奖励：</b> 累计 <b>¥{price_cny(bonus):.2f}</b>\n\n'
         f'━━━━━━━━━━━━━━━━\n'
         f'{premium_emoji("star", "🛒")} <b>自助选购</b>：点击下方按钮即可挑选。'
     )
@@ -909,7 +905,7 @@ def show_account_menu(call):
     account_shop_text = (
         "<b>晴天商城</b>\n"
         "选择下方品牌，浏览商品与规格。\n"
-        "标价以 USDT 结算。\n"
+        "所有商品均以人民币（CNY）标价。\n"
         "<i>自动采购与发货验证中，暂未开放上游商品付款。</i>"
     )
     safe_edit(bot, call.message.chat.id, call.message.message_id, account_shop_text, get_account_kb())
@@ -1196,7 +1192,7 @@ def pay_alipay_item(call):
         print("创建支付宝订单失败：", repr(exc), flush=True); return
     bot.answer_callback_query(call.id, "支付宝订单已创建")
     pay_kb = types.InlineKeyboardMarkup()
-    pay_kb.add(types.InlineKeyboardButton(text="打开支付宝收银台", url=order["payment_url"]))
+    pay_kb.add(premium_button("打开支付宝收银台", url=order["payment_url"]))
     bot.send_message(call.message.chat.id, payment_text, parse_mode="HTML", reply_markup=pay_kb)
     if ADMIN_ID.isdigit():
         bot.send_message(int(ADMIN_ID), f"🧾 新支付宝待核账订单\n订单：{order['order_id']}\n用户：{order['user_id']}\n金额：¥{order['amount_cny']}\n商品：{order['product_name']}")
